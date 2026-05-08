@@ -463,6 +463,9 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             if (!childProcess.HasExited)
             {
                 childProcess.Kill(entireProcessTree: true);
+                // Kill is asynchronous; wait for the root CLI process to exit so cleanup callers
+                // do not observe StopAsync/DisposeAsync completion while it is still tearing down.
+                await childProcess.WaitForExitAsync();
             }
         }
         catch (Exception ex)
@@ -1704,8 +1707,8 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             rpc.SetLocalRpcMethod("tool.call", handler.OnToolCallV2);
             rpc.SetLocalRpcMethod("permission.request", handler.OnPermissionRequestV2);
             rpc.SetLocalRpcMethod("userInput.request", handler.OnUserInputRequest);
-        rpc.SetLocalRpcMethod("exitPlanMode.request", handler.OnExitPlanModeRequest);
-        rpc.SetLocalRpcMethod("autoModeSwitch.request", handler.OnAutoModeSwitchRequest);
+            rpc.SetLocalRpcMethod("exitPlanMode.request", handler.OnExitPlanModeRequest);
+            rpc.SetLocalRpcMethod("autoModeSwitch.request", handler.OnAutoModeSwitchRequest);
             rpc.SetLocalRpcMethod("hooks.invoke", handler.OnHooksInvoke);
             rpc.SetLocalRpcMethod("systemMessage.transform", handler.OnSystemMessageTransform);
             ClientSessionApiRegistration.RegisterClientSessionApiHandlers(rpc, sessionId =>
@@ -2076,10 +2079,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                         Buffer.AppendLine(line);
                     }
 
-                    if (logger.IsEnabled(LogLevel.Debug))
-                    {
-                        logger.LogDebug("[CLI] {Line}", line);
-                    }
+                    logger.LogWarning("[CLI] {Line}", line);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
