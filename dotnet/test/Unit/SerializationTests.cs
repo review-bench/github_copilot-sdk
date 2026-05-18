@@ -4,7 +4,10 @@
 
 using Xunit;
 using System.Text.Json;
-using System.Text.Json.Serialization;
+#if !NET8_0_OR_GREATER
+using System.Runtime.Serialization;
+#endif
+using GitHub.Copilot.SDK.Rpc;
 
 namespace GitHub.Copilot.SDK.Test.Unit;
 
@@ -241,6 +244,43 @@ public class SerializationTests
         Assert.Equal(3000, httpConfig.Timeout);
     }
 
+    [Fact]
+    public void QueuedCommandResult_SerializesHandledAsBoolean_WithSdkOptions()
+    {
+        var options = GetSerializerOptions();
+        var original = new QueuedCommandResult
+        {
+            Handled = true,
+            StopProcessingQueue = false
+        };
+
+        var json = JsonSerializer.Serialize(original, options);
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        Assert.Equal(JsonValueKind.True, root.GetProperty("handled").ValueKind);
+        Assert.Equal(JsonValueKind.False, root.GetProperty("stopProcessingQueue").ValueKind);
+
+        var deserialized = JsonSerializer.Deserialize<QueuedCommandResult>("""{"handled":false}""", options);
+        Assert.NotNull(deserialized);
+        Assert.False(deserialized.Handled);
+        Assert.Null(deserialized.StopProcessingQueue);
+    }
+
+    [Fact]
+    public void PermissionDecision_SerializesBaseDiscriminator_WithSdkOptions()
+    {
+        var options = GetSerializerOptions();
+        var original = new PermissionDecision
+        {
+            Kind = PermissionRequestResultKind.Approved.Value
+        };
+
+        var json = JsonSerializer.Serialize(original, options);
+        using var document = JsonDocument.Parse(json);
+
+        Assert.Equal("approve-once", document.RootElement.GetProperty("kind").GetString());
+    }
+
     private static JsonSerializerOptions GetSerializerOptions()
     {
         var prop = typeof(CopilotClient)
@@ -261,7 +301,11 @@ public class SerializationTests
 
     private static object CreateInternalRequest(Type type, params (string Name, object? Value)[] properties)
     {
+#if NET8_0_OR_GREATER
         var instance = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(type);
+#else
+        var instance = FormatterServices.GetUninitializedObject(type);
+#endif
 
         foreach (var (name, value) in properties)
         {

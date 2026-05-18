@@ -1,6 +1,6 @@
 [package]
 name = "github-copilot-sdk"
-version = "0.1.0"
+version = "0.0.0-dev"
 edition = "2024"
 rust-version = "1.94.0"
 description = "Rust SDK for programmatic control of the GitHub Copilot CLI via JSON-RPC. Technical preview, pre-1.0."
@@ -13,7 +13,6 @@ readme = "README.md"
 license = "MIT"
 exclude = [
     "RELEASING.md",
-    "release-plz.toml",
     "rust-toolchain.toml",
     ".rustfmt.toml",
     ".rustfmt.nightly.toml",
@@ -52,6 +51,7 @@ parking_lot = "0.12"
 regex = "1"
 sha2 = { version = "0.10", optional = true }
 getrandom = "0.2"
+uuid = { version = "1", default-features = false, features = ["v4"] }
 zstd = { version = "0.13", optional = true }
 
 [dev-dependencies]

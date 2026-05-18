@@ -6,6 +6,8 @@ A Rust SDK for programmatic access to the GitHub Copilot CLI.
 
 See [github/copilot-sdk](https://github.com/github/copilot-sdk) for the equivalent SDKs in TypeScript, Python, Go, and .NET. The Rust SDK seeks parity with those SDKs; see [Differences From Other SDKs](#differences-from-other-sdks) below for the small set of intentional divergences.
 
+**Releases:** [github.com/github/copilot-sdk/releases?q=rust%2F](https://github.com/github/copilot-sdk/releases?q=rust%2F) — per-version release notes for the Rust crate.
+
 ## Quick Start
 
 ```rust,no_run
@@ -164,8 +166,8 @@ let forked = client
     .rpc()
     .sessions()
     .fork(github_copilot_sdk::generated::api_types::SessionsForkRequest {
-        session_id: "session-id".to_string(),
-        from_message_id: None,
+        session_id: "session-id".into(),
+        to_event_id: None,
     })
     .await?;
 ```

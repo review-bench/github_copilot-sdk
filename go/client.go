@@ -48,6 +48,7 @@ import (
 
 	"github.com/github/copilot-sdk/go/internal/embeddedcli"
 	"github.com/github/copilot-sdk/go/internal/jsonrpc2"
+	"github.com/github/copilot-sdk/go/internal/truncbuffer"
 	"github.com/github/copilot-sdk/go/rpc"
 )
 
@@ -63,7 +64,7 @@ func validateSessionFsConfig(config *SessionFsConfig) error {
 	if config.SessionStatePath == "" {
 		return errors.New("SessionFs.SessionStatePath is required")
 	}
-	if config.Conventions != rpc.SessionFSSetProviderConventionsPosix && config.Conventions != rpc.SessionFSSetProviderConventionsWindows {
+	if config.Conventions != rpc.SessionFsSetProviderConventionsPosix && config.Conventions != rpc.SessionFsSetProviderConventionsWindows {
 		return errors.New("SessionFs.Conventions must be either 'posix' or 'windows'")
 	}
 	return nil
@@ -372,7 +373,7 @@ func (c *Client) Start(ctx context.Context) error {
 
 	// If a session filesystem provider was configured, register it.
 	if c.options.SessionFs != nil {
-		_, err := c.RPC.SessionFs.SetProvider(ctx, &rpc.SessionFSSetProviderRequest{
+		_, err := c.RPC.SessionFs.SetProvider(ctx, &rpc.SessionFsSetProviderRequest{
 			InitialCwd:       c.options.SessionFs.InitialCwd,
 			SessionStatePath: c.options.SessionFs.SessionStatePath,
 			Conventions:      c.options.SessionFs.Conventions,
@@ -644,6 +645,7 @@ func (c *Client) CreateSession(ctx context.Context, config *SessionConfig) (*Ses
 	req.DisabledSkills = config.DisabledSkills
 	req.InfiniteSessions = config.InfiniteSessions
 	req.GitHubToken = config.GitHubToken
+	req.RemoteSession = config.RemoteSession
 
 	if len(config.Commands) > 0 {
 		cmds := make([]wireCommand, 0, len(config.Commands))
@@ -847,6 +849,7 @@ func (c *Client) ResumeSessionWithOptions(ctx context.Context, sessionID string,
 	req.DisabledSkills = config.DisabledSkills
 	req.InfiniteSessions = config.InfiniteSessions
 	req.GitHubToken = config.GitHubToken
+	req.RemoteSession = config.RemoteSession
 	req.RequestPermission = Bool(true)
 
 	if len(config.Commands) > 0 {
@@ -1442,6 +1445,11 @@ func (c *Client) verifyProtocolVersion(ctx context.Context) error {
 	return nil
 }
 
+// stderrBufferSize is the maximum number of bytes kept from the CLI process's
+// stderr. Only the tail is retained so that memory stays bounded even when the
+// process produces a large amount of diagnostic output.
+const stderrBufferSize = 64 * 1024
+
 // startCLIServer starts the CLI server process.
 //
 // This spawns the CLI server as a subprocess using the configured transport
@@ -1558,6 +1566,8 @@ func (c *Client) startCLIServer(ctx context.Context) error {
 			return fmt.Errorf("failed to create stdout pipe: %w", err)
 		}
 
+		c.process.Stderr = truncbuffer.NewTruncBuffer(stderrBufferSize)
+
 		if err := c.process.Start(); err != nil {
 			return fmt.Errorf("failed to start CLI server: %w", err)
 		}
@@ -1589,12 +1599,15 @@ func (c *Client) startCLIServer(ctx context.Context) error {
 			return fmt.Errorf("failed to create stdout pipe: %w", err)
 		}
 
+		c.process.Stderr = truncbuffer.NewTruncBuffer(stderrBufferSize)
+
 		if err := c.process.Start(); err != nil {
 			return fmt.Errorf("failed to start CLI server: %w", err)
 		}
 
 		c.monitorProcess()
 
+		proc := c.process
 		scanner := bufio.NewScanner(stdout)
 		portRegex := regexp.MustCompile(`listening on port (\d+)`)
 
@@ -1605,10 +1618,22 @@ func (c *Client) startCLIServer(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				killErr := c.killProcess()
-				return errors.Join(fmt.Errorf("failed waiting for CLI server to start: %w", ctx.Err()), killErr)
+				baseErr := fmt.Errorf("failed waiting for CLI server to start: %w", ctx.Err())
+				if buf, ok := proc.Stderr.(*truncbuffer.TruncBuffer); ok {
+					if stderr := strings.TrimSpace(buf.String()); stderr != "" {
+						baseErr = fmt.Errorf("%w; stderr: %s", baseErr, stderr)
+					}
+				}
+				return errors.Join(baseErr, killErr)
 			case <-c.processDone:
 				killErr := c.killProcess()
-				return errors.Join(errors.New("CLI server process exited before reporting port"), killErr)
+				baseErr := errors.New("CLI server process exited before reporting port")
+				if buf, ok := proc.Stderr.(*truncbuffer.TruncBuffer); ok {
+					if stderr := strings.TrimSpace(buf.String()); stderr != "" {
+						baseErr = fmt.Errorf("%w; stderr: %s", baseErr, stderr)
+					}
+				}
+				return errors.Join(baseErr, killErr)
 			default:
 				if scanner.Scan() {
 					line := scanner.Text()
@@ -1651,10 +1676,22 @@ func (c *Client) monitorProcess() {
 	c.processErrorPtr = &processError
 	go func() {
 		waitErr := proc.Wait()
+		var stderrOutput string
+		if buf, ok := proc.Stderr.(*truncbuffer.TruncBuffer); ok {
+			stderrOutput = strings.TrimSpace(buf.String())
+		}
 		if waitErr != nil {
-			processError = fmt.Errorf("CLI process exited: %w", waitErr)
+			if stderrOutput != "" {
+				processError = fmt.Errorf("CLI process exited: %w\nstderr: %s", waitErr, stderrOutput)
+			} else {
+				processError = fmt.Errorf("CLI process exited: %w", waitErr)
+			}
 		} else {
-			processError = errors.New("CLI process exited unexpectedly")
+			if stderrOutput != "" {
+				processError = fmt.Errorf("CLI process exited unexpectedly\nstderr: %s", stderrOutput)
+			} else {
+				processError = errors.New("CLI process exited unexpectedly")
+			}
 		}
 		close(done)
 	}()

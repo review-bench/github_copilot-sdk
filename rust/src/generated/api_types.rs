@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::session_events::ReasoningSummary;
 use crate::types::{RequestId, SessionId};
 
 /// JSON-RPC method name constants.
@@ -42,6 +43,8 @@ pub mod rpc_methods {
     pub const SESSIONFS_SETPROVIDER: &str = "sessionFs.setProvider";
     /// `sessions.fork`
     pub const SESSIONS_FORK: &str = "sessions.fork";
+    /// `sessions.connect`
+    pub const SESSIONS_CONNECT: &str = "sessions.connect";
     /// `session.suspend`
     pub const SESSION_SUSPEND: &str = "session.suspend";
     /// `session.auth.getStatus`
@@ -96,6 +99,8 @@ pub mod rpc_methods {
     pub const SESSION_TASKS_CANCEL: &str = "session.tasks.cancel";
     /// `session.tasks.remove`
     pub const SESSION_TASKS_REMOVE: &str = "session.tasks.remove";
+    /// `session.tasks.sendMessage`
+    pub const SESSION_TASKS_SENDMESSAGE: &str = "session.tasks.sendMessage";
     /// `session.skills.list`
     pub const SESSION_SKILLS_LIST: &str = "session.skills.list";
     /// `session.skills.enable`
@@ -126,8 +131,15 @@ pub mod rpc_methods {
     pub const SESSION_EXTENSIONS_RELOAD: &str = "session.extensions.reload";
     /// `session.tools.handlePendingToolCall`
     pub const SESSION_TOOLS_HANDLEPENDINGTOOLCALL: &str = "session.tools.handlePendingToolCall";
+    /// `session.commands.list`
+    pub const SESSION_COMMANDS_LIST: &str = "session.commands.list";
+    /// `session.commands.invoke`
+    pub const SESSION_COMMANDS_INVOKE: &str = "session.commands.invoke";
     /// `session.commands.handlePendingCommand`
     pub const SESSION_COMMANDS_HANDLEPENDINGCOMMAND: &str = "session.commands.handlePendingCommand";
+    /// `session.commands.respondToQueuedCommand`
+    pub const SESSION_COMMANDS_RESPONDTOQUEUEDCOMMAND: &str =
+        "session.commands.respondToQueuedCommand";
     /// `session.ui.elicitation`
     pub const SESSION_UI_ELICITATION: &str = "session.ui.elicitation";
     /// `session.ui.handlePendingElicitation`
@@ -178,7 +190,8 @@ pub mod rpc_methods {
     pub const SESSIONFS_RENAME: &str = "sessionFs.rename";
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Optional GitHub token used to look up quota for a specific user instead of the global auth context.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountGetQuotaRequest {
     /// GitHub token for per-user quota lookup. When provided, resolves this token to determine the user's quota instead of using the global auth.
@@ -186,7 +199,8 @@ pub struct AccountGetQuotaRequest {
     pub git_hub_token: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `AccountQuotaSnapshot` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountQuotaSnapshot {
     /// Number of requests included in the entitlement
@@ -208,14 +222,16 @@ pub struct AccountQuotaSnapshot {
     pub used_requests: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Quota usage snapshots for the resolved user, keyed by quota type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountGetQuotaResult {
     /// Quota snapshots keyed by type (e.g., chat, completions, premium_interactions)
     pub quota_snapshots: HashMap<String, AccountQuotaSnapshot>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `AgentInfo` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
     /// Description of the agent's purpose
@@ -229,42 +245,96 @@ pub struct AgentInfo {
     pub path: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The currently selected custom agent, or null when using the default agent.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentGetCurrentResult {
     /// Currently selected custom agent, or null if using the default agent
     pub agent: AgentInfo,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Custom agents available to the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentList {
     /// Available custom agents
     pub agents: Vec<AgentInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Custom agents available to the session after reloading definitions from disk.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentReloadResult {
     /// Reloaded custom agents
     pub agents: Vec<AgentInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Name of the custom agent to select for subsequent turns.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSelectRequest {
     /// Name of the custom agent to select
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The newly selected custom agent.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSelectResult {
     /// The newly selected custom agent
     pub agent: AgentInfo,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Optional unstructured input hint
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashCommandInput {
+    /// Optional completion hint for the input (e.g. 'directory' for filesystem path completion)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion: Option<SlashCommandInputCompletion>,
+    /// Hint to display when command input has not been provided
+    pub hint: String,
+    /// When true, clients should pass the full text after the command name as a single argument rather than splitting on whitespace
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preserve_multiline_input: Option<bool>,
+    /// When true, the command requires non-empty input; clients should render the input hint as required
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub required: Option<bool>,
+}
+
+/// Schema for the `SlashCommandInfo` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashCommandInfo {
+    /// Canonical aliases without leading slashes
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    /// Whether the command may run while an agent turn is active
+    pub allow_during_agent_execution: bool,
+    /// Human-readable command description
+    pub description: String,
+    /// Whether the command is experimental
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub experimental: Option<bool>,
+    /// Optional unstructured input hint
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<SlashCommandInput>,
+    /// Coarse command category for grouping and behavior: runtime built-in, skill-backed command, or SDK/client-owned command
+    pub kind: SlashCommandKind,
+    /// Canonical command name without a leading slash
+    pub name: String,
+}
+
+/// Slash commands available in the session, after applying any include/exclude filters.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandList {
+    /// Commands available in this session
+    pub commands: Vec<SlashCommandInfo>,
+}
+
+/// Pending command request ID and an optional error if the client handler failed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandsHandlePendingCommandRequest {
     /// Error message if the command handler failed
@@ -274,14 +344,114 @@ pub struct CommandsHandlePendingCommandRequest {
     pub request_id: RequestId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the pending client-handled command was completed successfully.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandsHandlePendingCommandResult {
     /// Whether the command was handled successfully
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Slash command name and optional raw input string to invoke.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandsInvokeRequest {
+    /// Raw input after the command name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
+    /// Command name. Leading slashes are stripped and the name is matched case-insensitively.
+    pub name: String,
+}
+
+/// Optional filters controlling which command sources to include in the listing.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandsListRequest {
+    /// Include runtime built-in commands
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_builtins: Option<bool>,
+    /// Include commands registered by protocol clients, including SDK clients and extensions
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_client_commands: Option<bool>,
+    /// Include enabled user-invocable skills and commands
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_skills: Option<bool>,
+}
+
+/// Queued command request ID and the result indicating whether the client handled it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandsRespondToQueuedCommandRequest {
+    /// Request ID from the queued command event
+    pub request_id: RequestId,
+    /// Result of the queued command execution
+    pub result: serde_json::Value,
+}
+
+/// Indicates whether the queued-command response was accepted by the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandsRespondToQueuedCommandResult {
+    /// Whether the response was accepted (false if the requestId was not found or already resolved)
+    pub success: bool,
+}
+
+/// Repository associated with the connected remote session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectedRemoteSessionMetadataRepository {
+    /// Branch associated with the remote session.
+    pub branch: String,
+    /// Repository name.
+    pub name: String,
+    /// Repository owner or organization login.
+    pub owner: String,
+}
+
+/// Metadata for a connected remote session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectedRemoteSessionMetadata {
+    /// Neutral SDK discriminator for the connected remote session kind.
+    pub kind: ConnectedRemoteSessionMetadataKind,
+    /// Last session update time as an ISO 8601 string.
+    pub modified_time: String,
+    /// Optional friendly session name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Pull request number associated with the session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pull_request_number: Option<i64>,
+    /// Repository associated with the connected remote session.
+    pub repository: ConnectedRemoteSessionMetadataRepository,
+    /// Original remote resource identifier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_id: Option<String>,
+    /// SDK session ID for the connected remote session.
+    pub session_id: SessionId,
+    /// Remote session staleness deadline as an ISO 8601 string.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stale_at: Option<String>,
+    /// Session start time as an ISO 8601 string.
+    pub start_time: String,
+    /// Remote session state returned by the backing service.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    /// Optional session summary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+/// Remote session connection parameters.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectRemoteSessionParams {
+    /// Session ID to connect to.
+    pub session_id: SessionId,
+}
+
+/// Optional connection token presented by the SDK client during the handshake.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectRequest {
     /// Connection token; required when the server was started with COPILOT_CONNECTION_TOKEN
@@ -289,7 +459,8 @@ pub struct ConnectRequest {
     pub token: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Handshake result reporting the server's protocol version and package version on success.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectResult {
     /// Always true on success
@@ -300,7 +471,8 @@ pub struct ConnectResult {
     pub version: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The currently selected model for the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CurrentModel {
     /// Currently active model identifier
@@ -308,7 +480,8 @@ pub struct CurrentModel {
     pub model_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `DiscoveredMcpServer` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveredMcpServer {
     /// Whether the server is enabled (not in the disabled list)
@@ -322,31 +495,8 @@ pub struct DiscoveredMcpServer {
     pub r#type: Option<DiscoveredMcpServerType>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EmbeddedBlobResourceContents {
-    /// Base64-encoded binary content of the resource
-    pub blob: String,
-    /// MIME type of the blob content
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mime_type: Option<String>,
-    /// URI identifying the resource
-    pub uri: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EmbeddedTextResourceContents {
-    /// MIME type of the text content
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mime_type: Option<String>,
-    /// Text content of the resource
-    pub text: String,
-    /// URI identifying the resource
-    pub uri: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `Extension` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Extension {
     /// Source-qualified ID (e.g., 'project:my-ext', 'user:auth-helper')
@@ -362,21 +512,24 @@ pub struct Extension {
     pub status: ExtensionStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Extensions discovered for the session, with their current status.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionList {
     /// Discovered extensions and their current status
     pub extensions: Vec<Extension>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Source-qualified extension identifier to disable for the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionsDisableRequest {
     /// Source-qualified extension ID to disable
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Source-qualified extension identifier to enable for the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtensionsEnableRequest {
     /// Source-qualified extension ID to enable
@@ -384,7 +537,7 @@ pub struct ExtensionsEnableRequest {
 }
 
 /// Expanded external tool result payload
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalToolTextResultForLlm {
     /// Structured content blocks from the tool
@@ -407,7 +560,7 @@ pub struct ExternalToolTextResultForLlm {
 }
 
 /// Audio content block with base64-encoded data
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalToolTextResultForLlmContentAudio {
     /// Base64-encoded audio data
@@ -419,7 +572,7 @@ pub struct ExternalToolTextResultForLlmContentAudio {
 }
 
 /// Image content block with base64-encoded data
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalToolTextResultForLlmContentImage {
     /// Base64-encoded image data
@@ -431,7 +584,7 @@ pub struct ExternalToolTextResultForLlmContentImage {
 }
 
 /// Embedded resource content block with inline text or binary data
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalToolTextResultForLlmContentResource {
     /// The embedded resource contents, either text or base64-encoded binary
@@ -441,7 +594,7 @@ pub struct ExternalToolTextResultForLlmContentResource {
 }
 
 /// Icon image for a resource
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalToolTextResultForLlmContentResourceLinkIcon {
     /// MIME type of the icon image
@@ -458,7 +611,7 @@ pub struct ExternalToolTextResultForLlmContentResourceLinkIcon {
 }
 
 /// Resource link content block referencing an external resource
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalToolTextResultForLlmContentResourceLink {
     /// Human-readable description of the resource
@@ -485,7 +638,7 @@ pub struct ExternalToolTextResultForLlmContentResourceLink {
 }
 
 /// Terminal/shell output content block with optional exit code and working directory
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalToolTextResultForLlmContentTerminal {
     /// Working directory where the command was executed
@@ -501,7 +654,7 @@ pub struct ExternalToolTextResultForLlmContentTerminal {
 }
 
 /// Plain text content block
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExternalToolTextResultForLlmContentText {
     /// The text content
@@ -510,7 +663,8 @@ pub struct ExternalToolTextResultForLlmContentText {
     pub r#type: ExternalToolTextResultForLlmContentTextType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Optional user prompt to combine with the fleet orchestration instructions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FleetStartRequest {
     /// Optional user prompt to combine with fleet instructions
@@ -518,14 +672,16 @@ pub struct FleetStartRequest {
     pub prompt: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether fleet mode was successfully activated.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FleetStartResult {
     /// Whether fleet mode was successfully activated
     pub started: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Pending external tool call request ID, with the tool result or an error describing why it failed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HandlePendingToolCallRequest {
     /// Error message if the tool call failed
@@ -538,7 +694,8 @@ pub struct HandlePendingToolCallRequest {
     pub result: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the external tool call result was handled successfully.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HandlePendingToolCallResult {
     /// Whether the tool call result was handled successfully
@@ -546,7 +703,7 @@ pub struct HandlePendingToolCallResult {
 }
 
 /// Post-compaction context window usage breakdown
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryCompactContextWindow {
     /// Token count from non-system messages (user, assistant, tool)
@@ -566,7 +723,8 @@ pub struct HistoryCompactContextWindow {
     pub tool_definitions_tokens: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Compaction outcome with the number of tokens and messages removed and the resulting context window breakdown.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryCompactResult {
     /// Post-compaction context window usage breakdown
@@ -580,21 +738,24 @@ pub struct HistoryCompactResult {
     pub tokens_removed: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifier of the event to truncate to; this event and all later events are removed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryTruncateRequest {
     /// Event ID to truncate to. This event and all events after it are removed from the session.
     pub event_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Number of events that were removed by the truncation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryTruncateResult {
     /// Number of events that were removed
     pub events_removed: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `InstructionsSources` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstructionsSources {
     /// Glob pattern from frontmatter — when set, this instruction applies only to matching files
@@ -617,14 +778,16 @@ pub struct InstructionsSources {
     pub r#type: InstructionsSourcesType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Instruction sources loaded for the session, in merge order.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstructionsGetSourcesResult {
     /// Instruction sources for the session
     pub sources: Vec<InstructionsSources>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Message text, optional severity level, persistence flag, and optional follow-up URL.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogRequest {
     /// When true, the message is transient and not persisted to the session event log on disk
@@ -640,14 +803,16 @@ pub struct LogRequest {
     pub url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifier of the session event that was emitted for the log message.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogResult {
     /// The unique identifier of the emitted session event
     pub event_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// MCP server name and configuration to add to user configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpConfigAddRequest {
     /// MCP server configuration (local/stdio or remote/http)
@@ -656,35 +821,40 @@ pub struct McpConfigAddRequest {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// MCP server names to disable for new sessions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpConfigDisableRequest {
     /// Names of MCP servers to disable. Each server is added to the persisted disabled list so new sessions skip it. Already-disabled names are ignored. Active sessions keep their current connections until they end.
     pub names: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// MCP server names to enable for new sessions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpConfigEnableRequest {
     /// Names of MCP servers to enable. Each server is removed from the persisted disabled list so new sessions spawn it. Unknown or already-enabled names are ignored.
     pub names: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// User-configured MCP servers, keyed by server name.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpConfigList {
     /// All MCP servers from user config, keyed by name
     pub servers: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// MCP server name to remove from user configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpConfigRemoveRequest {
     /// Name of the MCP server to remove
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// MCP server name and replacement configuration to write to user configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpConfigUpdateRequest {
     /// MCP server configuration (local/stdio or remote/http)
@@ -693,14 +863,16 @@ pub struct McpConfigUpdateRequest {
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Name of the MCP server to disable for the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpDisableRequest {
     /// Name of the MCP server to disable
     pub server_name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Optional working directory used as context for MCP server discovery.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpDiscoverRequest {
     /// Working directory used as context for discovery (e.g., plugin resolution)
@@ -708,21 +880,24 @@ pub struct McpDiscoverRequest {
     pub working_directory: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// MCP servers discovered from user, workspace, plugin, and built-in sources.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpDiscoverResult {
     /// MCP servers discovered from all sources
     pub servers: Vec<DiscoveredMcpServer>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Name of the MCP server to enable for the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpEnableRequest {
     /// Name of the MCP server to enable
     pub server_name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Remote MCP server name and optional overrides controlling reauthentication, OAuth client display name, and the callback success-page copy.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpOauthLoginRequest {
     /// Optional override for the body text shown on the OAuth loopback callback success page. When omitted, the runtime applies a neutral fallback; callers driving interactive auth should pass surface-specific copy telling the user where to return.
@@ -738,7 +913,8 @@ pub struct McpOauthLoginRequest {
     pub server_name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// OAuth authorization URL the caller should open, or empty when cached tokens already authenticated the server.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpOauthLoginResult {
     /// URL the caller should open in a browser to complete OAuth. Omitted when cached tokens were still valid and no browser interaction was needed — the server is already reconnected in that case. When present, the runtime starts the callback listener before returning and continues the flow in the background; completion is signaled via session.mcp_server_status_changed.
@@ -746,7 +922,8 @@ pub struct McpOauthLoginResult {
     pub authorization_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `McpServer` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServer {
     /// Error message if the server failed to connect
@@ -761,19 +938,26 @@ pub struct McpServer {
     pub status: McpServerStatus,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Remote MCP server configuration accessed over HTTP or SSE.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerConfigHttp {
+    /// Content filtering mode to apply to all tools, or a map of tool name to content filtering mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter_mapping: Option<serde_json::Value>,
+    /// HTTP headers to include in requests to the remote MCP server.
     #[serde(default)]
     pub headers: HashMap<String, String>,
+    /// Whether this server is a built-in fallback used when the user has not configured their own server.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_default_server: Option<bool>,
+    /// OAuth client ID for a pre-registered remote MCP OAuth client.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oauth_client_id: Option<String>,
+    /// OAuth grant type to use when authenticating to the remote MCP server.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oauth_grant_type: Option<McpServerConfigHttpOauthGrantType>,
+    /// Whether the configured OAuth client is public and does not require a client secret.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oauth_public_client: Option<bool>,
     /// Timeout in milliseconds for tool calls to this server.
@@ -785,20 +969,28 @@ pub struct McpServerConfigHttp {
     /// Remote transport type. Defaults to "http" when omitted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<McpServerConfigHttpType>,
+    /// URL of the remote MCP server endpoint.
     pub url: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Local MCP server configuration launched as a child process.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerConfigLocal {
+    /// Command-line arguments passed to the local MCP server process.
     pub args: Vec<String>,
+    /// Executable command used to start the local MCP server process.
     pub command: String,
+    /// Working directory for the local MCP server process.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    /// Environment variables to pass to the local MCP server process.
     #[serde(default)]
     pub env: HashMap<String, String>,
+    /// Content filtering mode to apply to all tools, or a map of tool name to content filtering mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filter_mapping: Option<serde_json::Value>,
+    /// Whether this server is a built-in fallback used when the user has not configured their own server.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_default_server: Option<bool>,
     /// Timeout in milliseconds for tool calls to this server.
@@ -807,27 +999,51 @@ pub struct McpServerConfigLocal {
     /// Tools to include. Defaults to all tools if not specified.
     #[serde(default)]
     pub tools: Vec<String>,
+    /// Local transport type. Defaults to "local".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<McpServerConfigLocalType>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// MCP servers configured for the session, with their connection status.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpServerList {
     /// Configured MCP servers
     pub servers: Vec<McpServer>,
 }
 
+/// Token-level pricing information for this model
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelBillingTokenPrices {
+    /// Number of tokens per standard billing batch
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_size: Option<i64>,
+    /// Price per billing batch of cached tokens in nano-AIUs (1 nano-AIU = 0.000000001 AIU, 1 AIU = $0.01 USD)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_price: Option<i64>,
+    /// Price per billing batch of input tokens in nano-AIUs (1 nano-AIU = 0.000000001 AIU, 1 AIU = $0.01 USD)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_price: Option<i64>,
+    /// Price per billing batch of output tokens in nano-AIUs (1 nano-AIU = 0.000000001 AIU, 1 AIU = $0.01 USD)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_price: Option<i64>,
+}
+
 /// Billing information
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelBilling {
     /// Billing cost multiplier relative to the base rate
-    pub multiplier: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multiplier: Option<f64>,
+    /// Token-level pricing information for this model
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_prices: Option<ModelBillingTokenPrices>,
 }
 
 /// Vision-specific limits
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelCapabilitiesLimitsVision {
     /// Maximum image size in bytes
@@ -842,7 +1058,7 @@ pub struct ModelCapabilitiesLimitsVision {
 }
 
 /// Token limits for prompts, outputs, and context window
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelCapabilitiesLimits {
     /// Maximum total context window size in tokens
@@ -863,7 +1079,7 @@ pub struct ModelCapabilitiesLimits {
 }
 
 /// Feature flags indicating what the model supports
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelCapabilitiesSupports {
     /// Whether this model supports reasoning effort configuration
@@ -875,7 +1091,7 @@ pub struct ModelCapabilitiesSupports {
 }
 
 /// Model capabilities and limits
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelCapabilities {
     /// Token limits for prompts, outputs, and context window
@@ -887,7 +1103,7 @@ pub struct ModelCapabilities {
 }
 
 /// Policy state (if applicable)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelPolicy {
     /// Current policy state for this model
@@ -897,7 +1113,8 @@ pub struct ModelPolicy {
     pub terms: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `Model` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Model {
     /// Billing information
@@ -910,6 +1127,12 @@ pub struct Model {
     pub default_reasoning_effort: Option<String>,
     /// Model identifier (e.g., "claude-sonnet-4.5")
     pub id: String,
+    /// Model capability category for grouping in the model picker
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_picker_category: Option<ModelPickerCategory>,
+    /// Relative cost tier for token-based billing users
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_picker_price_category: Option<ModelPickerPriceCategory>,
     /// Display name
     pub name: String,
     /// Policy state (if applicable)
@@ -920,7 +1143,8 @@ pub struct Model {
     pub supported_reasoning_efforts: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Vision-specific limits
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelCapabilitiesOverrideLimitsVision {
     /// Maximum image size in bytes
@@ -938,7 +1162,7 @@ pub struct ModelCapabilitiesOverrideLimitsVision {
 }
 
 /// Token limits for prompts, outputs, and context window
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelCapabilitiesOverrideLimits {
     /// Maximum total context window size in tokens
@@ -947,26 +1171,31 @@ pub struct ModelCapabilitiesOverrideLimits {
         skip_serializing_if = "Option::is_none"
     )]
     pub max_context_window_tokens: Option<i64>,
+    /// Maximum number of output/completion tokens
     #[serde(rename = "max_output_tokens", skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<i64>,
+    /// Maximum number of prompt/input tokens
     #[serde(rename = "max_prompt_tokens", skip_serializing_if = "Option::is_none")]
     pub max_prompt_tokens: Option<i64>,
+    /// Vision-specific limits
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vision: Option<ModelCapabilitiesOverrideLimitsVision>,
 }
 
 /// Feature flags indicating what the model supports
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelCapabilitiesOverrideSupports {
+    /// Whether this model supports reasoning effort configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<bool>,
+    /// Whether this model supports vision/image input
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vision: Option<bool>,
 }
 
 /// Override individual model capabilities resolved by the runtime
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelCapabilitiesOverride {
     /// Token limits for prompts, outputs, and context window
@@ -977,14 +1206,16 @@ pub struct ModelCapabilitiesOverride {
     pub supports: Option<ModelCapabilitiesOverrideSupports>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// List of Copilot models available to the resolved user, including capabilities and billing metadata.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelList {
     /// List of available models with full metadata
     pub models: Vec<Model>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Optional GitHub token used to list models for a specific user instead of the global auth context.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelsListRequest {
     /// GitHub token for per-user model listing. When provided, resolves this token to determine the user's Copilot plan and available models instead of using the global auth.
@@ -992,7 +1223,8 @@ pub struct ModelsListRequest {
     pub git_hub_token: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Target model identifier and optional reasoning effort, summary, and capability overrides.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelSwitchToRequest {
     /// Override individual model capabilities resolved by the runtime
@@ -1000,12 +1232,16 @@ pub struct ModelSwitchToRequest {
     pub model_capabilities: Option<ModelCapabilitiesOverride>,
     /// Model identifier to switch to
     pub model_id: String,
-    /// Reasoning effort level to use for the model
+    /// Reasoning effort level to use for the model. "none" disables reasoning.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    /// Reasoning summary mode to request for supported model clients
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_summary: Option<ReasoningSummary>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The model identifier active on the session after the switch.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelSwitchToResult {
     /// Currently active model identifier after the switch
@@ -1013,133 +1249,127 @@ pub struct ModelSwitchToResult {
     pub model_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Agent interaction mode to apply to the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModeSetRequest {
     /// The agent mode. Valid values: "interactive", "plan", "autopilot".
     pub mode: SessionMode,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The session's friendly name, or null when not yet set.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NameGetResult {
     /// The session name (user-set or auto-generated), or null if not yet set
     pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// New friendly name to apply to the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NameSetRequest {
     /// New session name (1–100 characters, trimmed of leading/trailing whitespace)
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `PermissionDecisionApproveOnce` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PermissionDecisionApproveForLocationApprovalCommands {
-    pub command_identifiers: Vec<String>,
-    pub kind: PermissionDecisionApproveForLocationApprovalCommandsKind,
+pub struct PermissionDecisionApproveOnce {
+    /// The permission request was approved for this one instance
+    pub kind: PermissionDecisionApproveOnceKind,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionDecisionApproveForLocationApprovalRead {
-    pub kind: PermissionDecisionApproveForLocationApprovalReadKind,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionDecisionApproveForLocationApprovalWrite {
-    pub kind: PermissionDecisionApproveForLocationApprovalWriteKind,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionDecisionApproveForLocationApprovalMcp {
-    pub kind: PermissionDecisionApproveForLocationApprovalMcpKind,
-    pub server_name: String,
-    pub tool_name: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionDecisionApproveForLocationApprovalMcpSampling {
-    pub kind: PermissionDecisionApproveForLocationApprovalMcpSamplingKind,
-    pub server_name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionDecisionApproveForLocationApprovalMemory {
-    pub kind: PermissionDecisionApproveForLocationApprovalMemoryKind,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionDecisionApproveForLocationApprovalCustomTool {
-    pub kind: PermissionDecisionApproveForLocationApprovalCustomToolKind,
-    pub tool_name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionDecisionApproveForLocation {
-    /// The approval to persist for this location
-    pub approval: PermissionDecisionApproveForLocationApproval,
-    /// Approved and persisted for this project location
-    pub kind: PermissionDecisionApproveForLocationKind,
-    /// The location key (git root or cwd) to persist the approval to
-    pub location_key: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `PermissionDecisionApproveForSessionApprovalCommands` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionDecisionApproveForSessionApprovalCommands {
+    /// Command identifiers covered by this approval.
     pub command_identifiers: Vec<String>,
+    /// Approval scoped to specific command identifiers.
     pub kind: PermissionDecisionApproveForSessionApprovalCommandsKind,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `PermissionDecisionApproveForSessionApprovalRead` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionDecisionApproveForSessionApprovalRead {
+    /// Approval covering read-only filesystem operations.
     pub kind: PermissionDecisionApproveForSessionApprovalReadKind,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `PermissionDecisionApproveForSessionApprovalWrite` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionDecisionApproveForSessionApprovalWrite {
+    /// Approval covering filesystem write operations.
     pub kind: PermissionDecisionApproveForSessionApprovalWriteKind,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `PermissionDecisionApproveForSessionApprovalMcp` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionDecisionApproveForSessionApprovalMcp {
+    /// Approval covering an MCP tool.
     pub kind: PermissionDecisionApproveForSessionApprovalMcpKind,
+    /// MCP server name.
     pub server_name: String,
+    /// MCP tool name, or null to cover every tool on the server.
     pub tool_name: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `PermissionDecisionApproveForSessionApprovalMcpSampling` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionDecisionApproveForSessionApprovalMcpSampling {
+    /// Approval covering MCP sampling requests for a server.
     pub kind: PermissionDecisionApproveForSessionApprovalMcpSamplingKind,
+    /// MCP server name.
     pub server_name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `PermissionDecisionApproveForSessionApprovalMemory` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionDecisionApproveForSessionApprovalMemory {
+    /// Approval covering writes to long-term memory.
     pub kind: PermissionDecisionApproveForSessionApprovalMemoryKind,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `PermissionDecisionApproveForSessionApprovalCustomTool` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionDecisionApproveForSessionApprovalCustomTool {
+    /// Approval covering a custom tool.
     pub kind: PermissionDecisionApproveForSessionApprovalCustomToolKind,
+    /// Custom tool name.
     pub tool_name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `PermissionDecisionApproveForSessionApprovalExtensionManagement` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionDecisionApproveForSessionApprovalExtensionManagement {
+    /// Approval covering extension lifecycle operations such as enable, disable, or reload.
+    pub kind: PermissionDecisionApproveForSessionApprovalExtensionManagementKind,
+    /// Optional operation identifier; when omitted, the approval covers all extension management operations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+}
+
+/// Schema for the `PermissionDecisionApproveForSessionApprovalExtensionPermissionAccess` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionDecisionApproveForSessionApprovalExtensionPermissionAccess {
+    /// Extension name.
+    pub extension_name: String,
+    /// Approval covering an extension's request to access a permission-gated capability.
+    pub kind: PermissionDecisionApproveForSessionApprovalExtensionPermissionAccessKind,
+}
+
+/// Schema for the `PermissionDecisionApproveForSession` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionDecisionApproveForSession {
     /// The approval to add as a session-scoped rule
@@ -1152,14 +1382,107 @@ pub struct PermissionDecisionApproveForSession {
     pub kind: PermissionDecisionApproveForSessionKind,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `PermissionDecisionApproveForLocationApprovalCommands` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PermissionDecisionApproveOnce {
-    /// The permission request was approved for this one instance
-    pub kind: PermissionDecisionApproveOnceKind,
+pub struct PermissionDecisionApproveForLocationApprovalCommands {
+    /// Command identifiers covered by this approval.
+    pub command_identifiers: Vec<String>,
+    /// Approval scoped to specific command identifiers.
+    pub kind: PermissionDecisionApproveForLocationApprovalCommandsKind,
 }
 
+/// Schema for the `PermissionDecisionApproveForLocationApprovalRead` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionDecisionApproveForLocationApprovalRead {
+    /// Approval covering read-only filesystem operations.
+    pub kind: PermissionDecisionApproveForLocationApprovalReadKind,
+}
+
+/// Schema for the `PermissionDecisionApproveForLocationApprovalWrite` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionDecisionApproveForLocationApprovalWrite {
+    /// Approval covering filesystem write operations.
+    pub kind: PermissionDecisionApproveForLocationApprovalWriteKind,
+}
+
+/// Schema for the `PermissionDecisionApproveForLocationApprovalMcp` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionDecisionApproveForLocationApprovalMcp {
+    /// Approval covering an MCP tool.
+    pub kind: PermissionDecisionApproveForLocationApprovalMcpKind,
+    /// MCP server name.
+    pub server_name: String,
+    /// MCP tool name, or null to cover every tool on the server.
+    pub tool_name: Option<String>,
+}
+
+/// Schema for the `PermissionDecisionApproveForLocationApprovalMcpSampling` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionDecisionApproveForLocationApprovalMcpSampling {
+    /// Approval covering MCP sampling requests for a server.
+    pub kind: PermissionDecisionApproveForLocationApprovalMcpSamplingKind,
+    /// MCP server name.
+    pub server_name: String,
+}
+
+/// Schema for the `PermissionDecisionApproveForLocationApprovalMemory` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionDecisionApproveForLocationApprovalMemory {
+    /// Approval covering writes to long-term memory.
+    pub kind: PermissionDecisionApproveForLocationApprovalMemoryKind,
+}
+
+/// Schema for the `PermissionDecisionApproveForLocationApprovalCustomTool` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionDecisionApproveForLocationApprovalCustomTool {
+    /// Approval covering a custom tool.
+    pub kind: PermissionDecisionApproveForLocationApprovalCustomToolKind,
+    /// Custom tool name.
+    pub tool_name: String,
+}
+
+/// Schema for the `PermissionDecisionApproveForLocationApprovalExtensionManagement` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionDecisionApproveForLocationApprovalExtensionManagement {
+    /// Approval covering extension lifecycle operations such as enable, disable, or reload.
+    pub kind: PermissionDecisionApproveForLocationApprovalExtensionManagementKind,
+    /// Optional operation identifier; when omitted, the approval covers all extension management operations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+}
+
+/// Schema for the `PermissionDecisionApproveForLocationApprovalExtensionPermissionAccess` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionDecisionApproveForLocationApprovalExtensionPermissionAccess {
+    /// Extension name.
+    pub extension_name: String,
+    /// Approval covering an extension's request to access a permission-gated capability.
+    pub kind: PermissionDecisionApproveForLocationApprovalExtensionPermissionAccessKind,
+}
+
+/// Schema for the `PermissionDecisionApproveForLocation` type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionDecisionApproveForLocation {
+    /// The approval to persist for this location
+    pub approval: PermissionDecisionApproveForLocationApproval,
+    /// Approved and persisted for this project location
+    pub kind: PermissionDecisionApproveForLocationKind,
+    /// The location key (git root or cwd) to persist the approval to
+    pub location_key: String,
+}
+
+/// Schema for the `PermissionDecisionApprovePermanently` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionDecisionApprovePermanently {
     /// The URL domain to approve permanently
@@ -1168,7 +1491,8 @@ pub struct PermissionDecisionApprovePermanently {
     pub kind: PermissionDecisionApprovePermanentlyKind,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `PermissionDecisionReject` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionDecisionReject {
     /// Optional feedback from the user explaining the denial
@@ -1178,54 +1502,63 @@ pub struct PermissionDecisionReject {
     pub kind: PermissionDecisionRejectKind,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `PermissionDecisionUserNotAvailable` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionDecisionUserNotAvailable {
     /// Denied because user confirmation was unavailable
     pub kind: PermissionDecisionUserNotAvailableKind,
 }
 
+/// Pending permission request ID and the decision to apply (approve/reject and scope).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionDecisionRequest {
     /// Request ID of the pending permission request
     pub request_id: RequestId,
+    /// Decision to apply to a pending permission request.
     pub result: PermissionDecision,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the permission decision was applied; false when the request was already resolved.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionRequestResult {
     /// Whether the permission request was handled successfully
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// No parameters; clears all session-scoped tool permission approvals.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionsResetSessionApprovalsRequest {}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the operation succeeded.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionsResetSessionApprovalsResult {
     /// Whether the operation succeeded
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Whether to auto-approve all tool permission requests for the rest of the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionsSetApproveAllRequest {
     /// Whether to auto-approve all tool permission requests
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the operation succeeded.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionsSetApproveAllResult {
     /// Whether the operation succeeded
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Optional message to echo back to the caller.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PingRequest {
     /// Optional message to echo back
@@ -1233,7 +1566,8 @@ pub struct PingRequest {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Server liveness response, including the echoed message, current timestamp, and protocol version.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PingResult {
     /// Echoed message (or default greeting)
@@ -1244,7 +1578,8 @@ pub struct PingResult {
     pub timestamp: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Existence, contents, and resolved path of the session plan file.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlanReadResult {
     /// The content of the plan file, or null if it does not exist
@@ -1255,14 +1590,16 @@ pub struct PlanReadResult {
     pub path: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Replacement contents to write to the session plan file.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlanUpdateRequest {
     /// The new content for the plan file
     pub content: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `Plugin` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Plugin {
     /// Whether the plugin is currently enabled
@@ -1276,24 +1613,65 @@ pub struct Plugin {
     pub version: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Plugins installed for the session, with their enabled state and version metadata.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginList {
     /// Installed plugins
     pub plugins: Vec<Plugin>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `QueuedCommandHandled` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedCommandHandled {
+    /// The command was handled
+    pub handled: bool,
+    /// If true, stop processing remaining queued items
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_processing_queue: Option<bool>,
+}
+
+/// Schema for the `QueuedCommandNotHandled` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueuedCommandNotHandled {
+    /// The command was not handled
+    pub handled: bool,
+}
+
+/// Optional remote session mode ("off", "export", or "on"); defaults to enabling both export and remote steering.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteEnableRequest {
+    /// Per-session remote mode. "off" disables remote, "export" exports session events to GitHub without enabling remote steering, "on" enables both export and remote steering.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<RemoteSessionMode>,
+}
+
+/// GitHub URL for the session and a flag indicating whether remote steering is enabled.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteEnableResult {
     /// Whether remote steering is enabled
     pub remote_steerable: bool,
-    /// Mission Control frontend URL for this session
+    /// GitHub frontend URL for this session
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Remote session connection result.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteSessionConnectionResult {
+    /// Metadata for a connected remote session.
+    pub metadata: ConnectedRemoteSessionMetadata,
+    /// SDK session ID for the connected remote session.
+    pub session_id: SessionId,
+}
+
+/// Schema for the `ServerSkill` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerSkill {
     /// Description of what the skill does
@@ -1314,14 +1692,16 @@ pub struct ServerSkill {
     pub user_invocable: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Skills discovered across global and project sources.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerSkillList {
     /// All discovered skills across all sources
     pub skills: Vec<ServerSkill>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Authentication status and account metadata for the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionAuthStatus {
     /// Authentication type
@@ -1343,7 +1723,8 @@ pub struct SessionAuthStatus {
     pub status_message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// File path, content to append, and optional mode for the client-provided session filesystem.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsAppendFileRequest {
     /// Content to append
@@ -1356,7 +1737,7 @@ pub struct SessionFsAppendFileRequest {
 }
 
 /// Describes a filesystem error.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsError {
     /// Error classification
@@ -1366,21 +1747,24 @@ pub struct SessionFsError {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Path to test for existence in the client-provided session filesystem.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsExistsRequest {
     /// Path using SessionFs conventions
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the requested path exists in the client-provided session filesystem.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsExistsResult {
     /// Whether the path exists
     pub exists: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Directory path to create in the client-provided session filesystem, with options for recursive creation and POSIX mode.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsMkdirRequest {
     /// Optional POSIX-style mode for newly created directories
@@ -1393,14 +1777,16 @@ pub struct SessionFsMkdirRequest {
     pub recursive: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Directory path whose entries should be listed from the client-provided session filesystem.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsReaddirRequest {
     /// Path using SessionFs conventions
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Names of entries in the requested directory, or a filesystem error if the read failed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsReaddirResult {
     /// Entry names in the directory
@@ -1410,7 +1796,8 @@ pub struct SessionFsReaddirResult {
     pub error: Option<SessionFsError>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `SessionFsReaddirWithTypesEntry` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsReaddirWithTypesEntry {
     /// Entry name
@@ -1419,14 +1806,16 @@ pub struct SessionFsReaddirWithTypesEntry {
     pub r#type: SessionFsReaddirWithTypesEntryType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Directory path whose entries (with type information) should be listed from the client-provided session filesystem.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsReaddirWithTypesRequest {
     /// Path using SessionFs conventions
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Entries in the requested directory paired with file/directory type information, or a filesystem error if the read failed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsReaddirWithTypesResult {
     /// Directory entries with type information
@@ -1436,14 +1825,16 @@ pub struct SessionFsReaddirWithTypesResult {
     pub error: Option<SessionFsError>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Path of the file to read from the client-provided session filesystem.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsReadFileRequest {
     /// Path using SessionFs conventions
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// File content as a UTF-8 string, or a filesystem error if the read failed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsReadFileResult {
     /// File content as UTF-8 string
@@ -1453,7 +1844,8 @@ pub struct SessionFsReadFileResult {
     pub error: Option<SessionFsError>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Source and destination paths for renaming or moving an entry in the client-provided session filesystem.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsRenameRequest {
     /// Destination path using SessionFs conventions
@@ -1462,7 +1854,8 @@ pub struct SessionFsRenameRequest {
     pub src: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Path to remove from the client-provided session filesystem, with options for recursive removal and force.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsRmRequest {
     /// Ignore errors if the path does not exist
@@ -1475,7 +1868,8 @@ pub struct SessionFsRmRequest {
     pub recursive: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Initial working directory, session-state path layout, and path conventions used to register the calling SDK client as the session filesystem provider.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsSetProviderRequest {
     /// Path conventions used by this filesystem
@@ -1486,21 +1880,24 @@ pub struct SessionFsSetProviderRequest {
     pub session_state_path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the calling client was registered as the session filesystem provider.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsSetProviderResult {
     /// Whether the provider was set successfully
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Path whose metadata should be returned from the client-provided session filesystem.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsStatRequest {
     /// Path using SessionFs conventions
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Filesystem metadata for the requested path, or a filesystem error if the stat failed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsStatResult {
     /// ISO 8601 timestamp of creation
@@ -1518,7 +1915,8 @@ pub struct SessionFsStatResult {
     pub size: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// File path, content to write, and optional mode for the client-provided session filesystem.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFsWriteFileRequest {
     /// Content to write
@@ -1530,9 +1928,13 @@ pub struct SessionFsWriteFileRequest {
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Source session identifier to fork from, optional event-ID boundary, and optional friendly name for the new session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionsForkRequest {
+    /// Optional friendly name to assign to the forked session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// Source session ID to fork from
     pub session_id: SessionId,
     /// Optional event ID boundary. When provided, the fork includes only events before this ID (exclusive). When omitted, all events are included.
@@ -1540,14 +1942,19 @@ pub struct SessionsForkRequest {
     pub to_event_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifier and optional friendly name assigned to the newly forked session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionsForkResult {
+    /// Friendly name assigned to the forked session, if any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// The new forked session's ID
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Shell command to run, with optional working directory and timeout in milliseconds.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShellExecRequest {
     /// Shell command to execute
@@ -1560,14 +1967,16 @@ pub struct ShellExecRequest {
     pub timeout: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifier of the spawned process, used to correlate streamed output and exit notifications.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShellExecResult {
     /// Unique identifier for tracking streamed output
     pub process_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifier of a process previously returned by "shell.exec" and the signal to send.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShellKillRequest {
     /// Process identifier returned by shell.exec
@@ -1577,14 +1986,16 @@ pub struct ShellKillRequest {
     pub signal: Option<ShellKillSignal>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the signal was delivered; false if the process was unknown or already exited.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShellKillResult {
     /// Whether the signal was sent successfully
     pub killed: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `Skill` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Skill {
     /// Description of what the skill does
@@ -1602,28 +2013,32 @@ pub struct Skill {
     pub user_invocable: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Skills available to the session, with their enabled state.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillList {
     /// Available skills
     pub skills: Vec<Skill>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Skill names to mark as disabled in global configuration, replacing any previous list.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillsConfigSetDisabledSkillsRequest {
     /// List of skill names to disable
     pub disabled_skills: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Name of the skill to disable for the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillsDisableRequest {
     /// Name of the skill to disable
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Optional project paths and additional skill directories to include in discovery.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillsDiscoverRequest {
     /// Optional list of project directory paths to scan for project-scoped skills
@@ -1634,14 +2049,77 @@ pub struct SkillsDiscoverRequest {
     pub skill_directories: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Name of the skill to enable for the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillsEnableRequest {
     /// Name of the skill to enable
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Diagnostics from reloading skill definitions, with warnings and errors as separate lists.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillsLoadDiagnostics {
+    /// Errors emitted while loading skills (e.g. skills that failed to load entirely)
+    pub errors: Vec<String>,
+    /// Warnings emitted while loading skills (e.g. skills that loaded but had issues)
+    pub warnings: Vec<String>,
+}
+
+/// Schema for the `SlashCommandAgentPromptResult` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashCommandAgentPromptResult {
+    /// Prompt text to display to the user
+    pub display_prompt: String,
+    /// Agent prompt result discriminator
+    pub kind: SlashCommandAgentPromptResultKind,
+    /// Optional target session mode
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<SlashCommandAgentPromptMode>,
+    /// Prompt to submit to the agent
+    pub prompt: String,
+    /// True when the invocation mutated user runtime settings; consumers caching settings should refresh
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_settings_changed: Option<bool>,
+}
+
+/// Schema for the `SlashCommandCompletedResult` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashCommandCompletedResult {
+    /// Completed result discriminator
+    pub kind: SlashCommandCompletedResultKind,
+    /// Optional user-facing message describing the completed command
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    /// True when the invocation mutated user runtime settings; consumers caching settings should refresh
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_settings_changed: Option<bool>,
+}
+
+/// Schema for the `SlashCommandTextResult` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlashCommandTextResult {
+    /// Text result discriminator
+    pub kind: SlashCommandTextResultKind,
+    /// Whether text contains Markdown
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub markdown: Option<bool>,
+    /// Whether ANSI sequences should be preserved
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preserve_ansi: Option<bool>,
+    /// True when the invocation mutated user runtime settings; consumers caching settings should refresh
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_settings_changed: Option<bool>,
+    /// Text output for the client to render
+    pub text: String,
+}
+
+/// Schema for the `TaskAgentInfo` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskAgentInfo {
     /// ISO 8601 timestamp when the current active period began
@@ -1692,28 +2170,32 @@ pub struct TaskAgentInfo {
     pub r#type: TaskAgentInfoType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Background tasks currently tracked by the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskList {
     /// Currently tracked tasks
     pub tasks: Vec<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifier of the background task to cancel.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TasksCancelRequest {
     /// Task identifier
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the background task was successfully cancelled.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TasksCancelResult {
     /// Whether the task was successfully cancelled
     pub cancelled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `TaskShellInfo` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskShellInfo {
     /// Whether the shell runs inside a managed PTY session or as an independent background process
@@ -1747,35 +2229,64 @@ pub struct TaskShellInfo {
     pub r#type: TaskShellInfoType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifier of the task to promote to background mode.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TasksPromoteToBackgroundRequest {
     /// Task identifier
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the task was successfully promoted to background mode.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TasksPromoteToBackgroundResult {
     /// Whether the task was successfully promoted to background mode
     pub promoted: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifier of the completed or cancelled task to remove from tracking.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TasksRemoveRequest {
     /// Task identifier
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the task was removed. False when the task does not exist or is still running/idle.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TasksRemoveResult {
     /// Whether the task was removed. Returns false if the task does not exist or is still running/idle (cancel it first).
     pub removed: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifier of the target agent task, message content, and optional sender agent ID.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TasksSendMessageRequest {
+    /// Agent ID of the sender, if sent on behalf of another agent
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_agent_id: Option<String>,
+    /// Agent task identifier
+    pub id: String,
+    /// Message content to send to the agent
+    pub message: String,
+}
+
+/// Indicates whether the message was delivered, with an error message when delivery failed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TasksSendMessageResult {
+    /// Error message if delivery failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Whether the message was successfully delivered or steered
+    pub sent: bool,
+}
+
+/// Agent type, prompt, name, and optional description and model override for the new task.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TasksStartAgentRequest {
     /// Type of agent to start (e.g., 'explore', 'task', 'general-purpose')
@@ -1792,14 +2303,16 @@ pub struct TasksStartAgentRequest {
     pub prompt: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifier assigned to the newly started background agent task.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TasksStartAgentResult {
     /// Generated agent ID for the background task
     pub agent_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `Tool` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tool {
     /// Description of what the tool does
@@ -1817,14 +2330,16 @@ pub struct Tool {
     pub parameters: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Built-in tools available for the requested model, with their parameters and instructions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolList {
     /// List of available built-in tools with metadata
     pub tools: Vec<Tool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Optional model identifier whose tool overrides should be applied to the listing.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolsListRequest {
     /// Optional model ID — when provided, the returned tool list reflects model-specific overrides
@@ -1832,62 +2347,86 @@ pub struct ToolsListRequest {
     pub model: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `UIElicitationArrayAnyOfFieldItemsAnyOf` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIElicitationArrayAnyOfFieldItemsAnyOf {
+    /// Value submitted when this option is selected.
     pub r#const: String,
+    /// Display label for this option.
     pub title: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema applied to each item in the array.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIElicitationArrayAnyOfFieldItems {
+    /// Selectable options, each with a value and a display label.
     pub any_of: Vec<UIElicitationArrayAnyOfFieldItemsAnyOf>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Multi-select string field where each option pairs a value with a display label.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIElicitationArrayAnyOfField {
+    /// Default values selected when the form is first shown.
     #[serde(default)]
     pub default: Vec<String>,
+    /// Help text describing the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Schema applied to each item in the array.
     pub items: UIElicitationArrayAnyOfFieldItems,
+    /// Maximum number of items the user may select.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_items: Option<f64>,
+    /// Minimum number of items the user must select.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_items: Option<f64>,
+    /// Human-readable label for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Type discriminator. Always "array".
     pub r#type: UIElicitationArrayAnyOfFieldType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema applied to each item in the array.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIElicitationArrayEnumFieldItems {
+    /// Allowed string values for each selected item.
     pub r#enum: Vec<String>,
+    /// Type discriminator. Always "string".
     pub r#type: UIElicitationArrayEnumFieldItemsType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Multi-select string field whose allowed values are defined inline.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIElicitationArrayEnumField {
+    /// Default values selected when the form is first shown.
     #[serde(default)]
     pub default: Vec<String>,
+    /// Help text describing the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Schema applied to each item in the array.
     pub items: UIElicitationArrayEnumFieldItems,
+    /// Maximum number of items the user may select.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_items: Option<f64>,
+    /// Minimum number of items the user must select.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_items: Option<f64>,
+    /// Human-readable label for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Type discriminator. Always "array".
     pub r#type: UIElicitationArrayEnumFieldType,
 }
 
 /// JSON Schema describing the form fields to present to the user
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIElicitationSchema {
     /// Form field definitions, keyed by field name
@@ -1899,7 +2438,8 @@ pub struct UIElicitationSchema {
     pub r#type: UIElicitationSchemaType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Prompt message and JSON schema describing the form fields to elicit from the user.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIElicitationRequest {
     /// Message describing what information is needed from the user
@@ -1909,7 +2449,7 @@ pub struct UIElicitationRequest {
 }
 
 /// The elicitation response (accept with form values, decline, or cancel)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIElicitationResponse {
     /// The user's response: accept (submitted), decline (rejected), or cancel (dismissed)
@@ -1919,95 +2459,133 @@ pub struct UIElicitationResponse {
     pub content: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the elicitation response was accepted; false if it was already resolved by another client.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIElicitationResult {
     /// Whether the response was accepted. False if the request was already resolved by another client.
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Boolean field rendered as a yes/no toggle.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIElicitationSchemaPropertyBoolean {
+    /// Default value selected when the form is first shown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<bool>,
+    /// Help text describing the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Human-readable label for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Type discriminator. Always "boolean".
     pub r#type: UIElicitationSchemaPropertyBooleanType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Numeric field accepting either a number or an integer.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIElicitationSchemaPropertyNumber {
+    /// Default value populated in the input when the form is first shown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<f64>,
+    /// Help text describing the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Maximum allowed value (inclusive).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub maximum: Option<f64>,
+    /// Minimum allowed value (inclusive).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minimum: Option<f64>,
+    /// Human-readable label for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Numeric type accepted by the field.
     pub r#type: UIElicitationSchemaPropertyNumberType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Free-text string field with optional length and format constraints.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIElicitationSchemaPropertyString {
+    /// Default value populated in the input when the form is first shown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<String>,
+    /// Help text describing the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Optional format hint that constrains the accepted input.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<UIElicitationSchemaPropertyStringFormat>,
+    /// Maximum number of characters allowed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_length: Option<f64>,
+    /// Minimum number of characters required.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_length: Option<f64>,
+    /// Human-readable label for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Type discriminator. Always "string".
     pub r#type: UIElicitationSchemaPropertyStringType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Single-select string field whose allowed values are defined inline.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIElicitationStringEnumField {
+    /// Default value selected when the form is first shown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<String>,
+    /// Help text describing the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Allowed string values.
     pub r#enum: Vec<String>,
+    /// Optional display labels for each enum value, in the same order as `enum`.
     #[serde(default)]
     pub enum_names: Vec<String>,
+    /// Human-readable label for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Type discriminator. Always "string".
     pub r#type: UIElicitationStringEnumFieldType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `UIElicitationStringOneOfFieldOneOf` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIElicitationStringOneOfFieldOneOf {
+    /// Value submitted when this option is selected.
     pub r#const: String,
+    /// Display label for this option.
     pub title: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Single-select string field where each option pairs a value with a display label.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIElicitationStringOneOfField {
+    /// Default value selected when the form is first shown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<String>,
+    /// Help text describing the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Selectable options, each with a value and a display label.
     pub one_of: Vec<UIElicitationStringOneOfFieldOneOf>,
+    /// Human-readable label for the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Type discriminator. Always "string".
     pub r#type: UIElicitationStringOneOfFieldType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Pending elicitation request ID and the user's response (accept/decline/cancel + form values).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UIHandlePendingElicitationRequest {
     /// The unique request ID from the elicitation.requested event
@@ -2017,7 +2595,7 @@ pub struct UIHandlePendingElicitationRequest {
 }
 
 /// Aggregated code change metrics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageMetricsCodeChanges {
     /// Number of distinct files modified
@@ -2029,7 +2607,7 @@ pub struct UsageMetricsCodeChanges {
 }
 
 /// Request count and cost metrics for this model
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageMetricsModelMetricRequests {
     /// User-initiated premium request cost (with multiplier applied)
@@ -2038,7 +2616,8 @@ pub struct UsageMetricsModelMetricRequests {
     pub count: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `UsageMetricsModelMetricTokenDetail` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageMetricsModelMetricTokenDetail {
     /// Accumulated token count for this token type
@@ -2046,7 +2625,7 @@ pub struct UsageMetricsModelMetricTokenDetail {
 }
 
 /// Token usage metrics for this model
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageMetricsModelMetricUsage {
     /// Total tokens read from prompt cache
@@ -2062,7 +2641,8 @@ pub struct UsageMetricsModelMetricUsage {
     pub reasoning_tokens: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `UsageMetricsModelMetric` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageMetricsModelMetric {
     /// Request count and cost metrics for this model
@@ -2077,14 +2657,16 @@ pub struct UsageMetricsModelMetric {
     pub usage: UsageMetricsModelMetricUsage,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Schema for the `UsageMetricsTokenDetail` type.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageMetricsTokenDetail {
     /// Accumulated token count for this token type
     pub token_count: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Accumulated session usage metrics, including premium request cost, token counts, model breakdown, and code-change totals.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageGetMetricsResult {
     /// Aggregated code change metrics
@@ -2114,7 +2696,8 @@ pub struct UsageGetMetricsResult {
     pub total_user_requests: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Relative path and UTF-8 content for the workspace file to create or overwrite.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacesCreateFileRequest {
     /// File content to write as a UTF-8 string
@@ -2123,7 +2706,7 @@ pub struct WorkspacesCreateFileRequest {
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacesGetWorkspaceResultWorkspace {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2154,10 +2737,6 @@ pub struct WorkspacesGetWorkspaceResultWorkspace {
     pub remote_steerable: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
-    #[serde(rename = "session_sync_level", skip_serializing_if = "Option::is_none")]
-    pub session_sync_level: Option<WorkspacesGetWorkspaceResultWorkspaceSessionSyncLevel>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
     #[serde(rename = "summary_count", skip_serializing_if = "Option::is_none")]
     pub summary_count: Option<i64>,
     #[serde(rename = "updated_at", skip_serializing_if = "Option::is_none")]
@@ -2166,77 +2745,98 @@ pub struct WorkspacesGetWorkspaceResultWorkspace {
     pub user_named: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Current workspace metadata for the session, or null when not available.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacesGetWorkspaceResult {
     /// Current workspace metadata, or null if not available
     pub workspace: Option<WorkspacesGetWorkspaceResultWorkspace>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Relative paths of files stored in the session workspace files directory.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacesListFilesResult {
     /// Relative file paths in the workspace files directory
     pub files: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Relative path of the workspace file to read.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacesReadFileRequest {
     /// Relative path within the workspace files directory
     pub path: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Contents of the requested workspace file as a UTF-8 string.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspacesReadFileResult {
     /// File content as a UTF-8 string
     pub content: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// List of Copilot models available to the resolved user, including capabilities and billing metadata.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelsListResult {
     /// List of available models with full metadata
     pub models: Vec<Model>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Built-in tools available for the requested model, with their parameters and instructions.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolsListResult {
     /// List of available built-in tools with metadata
     pub tools: Vec<Tool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// User-configured MCP servers, keyed by server name.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct McpConfigListResult {
     /// All MCP servers from user config, keyed by name
     pub servers: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Skills discovered across global and project sources.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillsDiscoverResult {
     /// All discovered skills across all sources
     pub skills: Vec<ServerSkill>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Remote session connection result.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionsConnectResult {
+    /// Metadata for a connected remote session.
+    pub metadata: ConnectedRemoteSessionMetadata,
+    /// SDK session ID for the connected remote session.
+    pub session_id: SessionId,
+}
+
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSuspendParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionAuthGetStatusParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Authentication status and account metadata for the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionAuthGetStatusResult {
     /// Authentication type
@@ -2258,14 +2858,16 @@ pub struct SessionAuthGetStatusResult {
     pub status_message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionModelGetCurrentParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The currently selected model for the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionModelGetCurrentResult {
     /// Currently active model identifier
@@ -2273,7 +2875,8 @@ pub struct SessionModelGetCurrentResult {
     pub model_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The model identifier active on the session after the switch.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionModelSwitchToResult {
     /// Currently active model identifier after the switch
@@ -2281,35 +2884,40 @@ pub struct SessionModelSwitchToResult {
     pub model_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionModeGetParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionNameGetParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The session's friendly name, or null when not yet set.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionNameGetResult {
     /// The session name (user-set or auto-generated), or null if not yet set
     pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionPlanReadParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Existence, contents, and resolved path of the session plan file.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionPlanReadResult {
     /// The content of the plan file, or null if it does not exist
@@ -2320,21 +2928,23 @@ pub struct SessionPlanReadResult {
     pub path: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionPlanDeleteParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionWorkspacesGetWorkspaceParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionWorkspacesGetWorkspaceResultWorkspace {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2365,10 +2975,6 @@ pub struct SessionWorkspacesGetWorkspaceResultWorkspace {
     pub remote_steerable: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
-    #[serde(rename = "session_sync_level", skip_serializing_if = "Option::is_none")]
-    pub session_sync_level: Option<SessionWorkspacesGetWorkspaceResultWorkspaceSessionSyncLevel>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub summary: Option<String>,
     #[serde(rename = "summary_count", skip_serializing_if = "Option::is_none")]
     pub summary_count: Option<i64>,
     #[serde(rename = "updated_at", skip_serializing_if = "Option::is_none")]
@@ -2377,196 +2983,245 @@ pub struct SessionWorkspacesGetWorkspaceResultWorkspace {
     pub user_named: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Current workspace metadata for the session, or null when not available.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionWorkspacesGetWorkspaceResult {
     /// Current workspace metadata, or null if not available
     pub workspace: Option<SessionWorkspacesGetWorkspaceResultWorkspace>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionWorkspacesListFilesParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Relative paths of files stored in the session workspace files directory.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionWorkspacesListFilesResult {
     /// Relative file paths in the workspace files directory
     pub files: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Contents of the requested workspace file as a UTF-8 string.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionWorkspacesReadFileResult {
     /// File content as a UTF-8 string
     pub content: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionInstructionsGetSourcesParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Instruction sources loaded for the session, in merge order.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionInstructionsGetSourcesResult {
     /// Instruction sources for the session
     pub sources: Vec<InstructionsSources>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether fleet mode was successfully activated.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionFleetStartResult {
     /// Whether fleet mode was successfully activated
     pub started: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionAgentListParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Custom agents available to the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionAgentListResult {
     /// Available custom agents
     pub agents: Vec<AgentInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionAgentGetCurrentParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The currently selected custom agent, or null when using the default agent.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionAgentGetCurrentResult {
     /// Currently selected custom agent, or null if using the default agent
     pub agent: AgentInfo,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The newly selected custom agent.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionAgentSelectResult {
     /// The newly selected custom agent
     pub agent: AgentInfo,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionAgentDeselectParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionAgentReloadParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Custom agents available to the session after reloading definitions from disk.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionAgentReloadResult {
     /// Reloaded custom agents
     pub agents: Vec<AgentInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifier assigned to the newly started background agent task.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTasksStartAgentResult {
     /// Generated agent ID for the background task
     pub agent_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTasksListParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Background tasks currently tracked by the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTasksListResult {
     /// Currently tracked tasks
     pub tasks: Vec<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the task was successfully promoted to background mode.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTasksPromoteToBackgroundResult {
     /// Whether the task was successfully promoted to background mode
     pub promoted: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the background task was successfully cancelled.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTasksCancelResult {
     /// Whether the task was successfully cancelled
     pub cancelled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the task was removed. False when the task does not exist or is still running/idle.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTasksRemoveResult {
     /// Whether the task was removed. Returns false if the task does not exist or is still running/idle (cancel it first).
     pub removed: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the message was delivered, with an error message when delivery failed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTasksSendMessageResult {
+    /// Error message if delivery failed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Whether the message was successfully delivered or steered
+    pub sent: bool,
+}
+
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSkillsListParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Skills available to the session, with their enabled state.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSkillsListResult {
     /// Available skills
     pub skills: Vec<Skill>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSkillsReloadParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Diagnostics from reloading skill definitions, with warnings and errors as separate lists.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSkillsReloadResult {
+    /// Errors emitted while loading skills (e.g. skills that failed to load entirely)
+    pub errors: Vec<String>,
+    /// Warnings emitted while loading skills (e.g. skills that loaded but had issues)
+    pub warnings: Vec<String>,
+}
+
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionMcpListParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// MCP servers configured for the session, with their connection status.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionMcpListResult {
     /// Configured MCP servers
     pub servers: Vec<McpServer>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionMcpReloadParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// OAuth authorization URL the caller should open, or empty when cached tokens already authenticated the server.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionMcpOauthLoginResult {
     /// URL the caller should open in a browser to complete OAuth. Omitted when cached tokens were still valid and no browser interaction was needed — the server is already reconnected in that case. When present, the runtime starts the callback listener before returning and continues the flow in the background; completion is signaled via session.mcp_server_status_changed.
@@ -2574,57 +3229,80 @@ pub struct SessionMcpOauthLoginResult {
     pub authorization_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionPluginsListParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Plugins installed for the session, with their enabled state and version metadata.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionPluginsListResult {
     /// Installed plugins
     pub plugins: Vec<Plugin>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionExtensionsListParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Extensions discovered for the session, with their current status.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionExtensionsListResult {
     /// Discovered extensions and their current status
     pub extensions: Vec<Extension>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionExtensionsReloadParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the external tool call result was handled successfully.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionToolsHandlePendingToolCallResult {
     /// Whether the tool call result was handled successfully
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Slash commands available in the session, after applying any include/exclude filters.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCommandsListResult {
+    /// Commands available in this session
+    pub commands: Vec<SlashCommandInfo>,
+}
+
+/// Indicates whether the pending client-handled command was completed successfully.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionCommandsHandlePendingCommandResult {
     /// Whether the command was handled successfully
     pub success: bool,
 }
 
+/// Indicates whether the queued-command response was accepted by the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCommandsRespondToQueuedCommandResult {
+    /// Whether the response was accepted (false if the requestId was not found or already resolved)
+    pub success: bool,
+}
+
 /// The elicitation response (accept with form values, decline, or cancel)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionUiElicitationResult {
     /// The user's response: accept (submitted), decline (rejected), or cancel (dismissed)
@@ -2634,63 +3312,72 @@ pub struct SessionUiElicitationResult {
     pub content: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the elicitation response was accepted; false if it was already resolved by another client.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionUiHandlePendingElicitationResult {
     /// Whether the response was accepted. False if the request was already resolved by another client.
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the permission decision was applied; false when the request was already resolved.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionPermissionsHandlePendingPermissionRequestResult {
     /// Whether the permission request was handled successfully
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the operation succeeded.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionPermissionsSetApproveAllResult {
     /// Whether the operation succeeded
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the operation succeeded.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionPermissionsResetSessionApprovalsResult {
     /// Whether the operation succeeded
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifier of the session event that was emitted for the log message.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionLogResult {
     /// The unique identifier of the emitted session event
     pub event_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifier of the spawned process, used to correlate streamed output and exit notifications.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionShellExecResult {
     /// Unique identifier for tracking streamed output
     pub process_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Indicates whether the signal was delivered; false if the process was unknown or already exited.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionShellKillResult {
     /// Whether the signal was sent successfully
     pub killed: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionHistoryCompactParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Compaction outcome with the number of tokens and messages removed and the resulting context window breakdown.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionHistoryCompactResult {
     /// Post-compaction context window usage breakdown
@@ -2704,21 +3391,24 @@ pub struct SessionHistoryCompactResult {
     pub tokens_removed: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Number of events that were removed by the truncation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionHistoryTruncateResult {
     /// Number of events that were removed
     pub events_removed: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionUsageGetMetricsParams {
     /// Target session identifier
     pub session_id: SessionId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Accumulated session usage metrics, including premium request cost, token counts, model breakdown, and code-change totals.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionUsageGetMetricsResult {
     /// Aggregated code change metrics
@@ -2748,24 +3438,19 @@ pub struct SessionUsageGetMetricsResult {
     pub total_user_requests: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionRemoteEnableParams {
-    /// Target session identifier
-    pub session_id: SessionId,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// GitHub URL for the session and a flag indicating whether remote steering is enabled.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionRemoteEnableResult {
     /// Whether remote steering is enabled
     pub remote_steerable: bool,
-    /// Mission Control frontend URL for this session
+    /// GitHub frontend URL for this session
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Identifies the target session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionRemoteDisableParams {
     /// Target session identifier
@@ -2773,7 +3458,7 @@ pub struct SessionRemoteDisableParams {
 }
 
 /// Authentication type
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AuthInfoType {
     #[serde(rename = "hmac")]
     Hmac,
@@ -2790,12 +3475,52 @@ pub enum AuthInfoType {
     #[serde(rename = "copilot-api-token")]
     CopilotApiToken,
     /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// Optional completion hint for the input (e.g. 'directory' for filesystem path completion)
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SlashCommandInputCompletion {
+    #[serde(rename = "directory")]
+    Directory,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// Coarse command category for grouping and behavior: runtime built-in, skill-backed command, or SDK/client-owned command
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SlashCommandKind {
+    #[serde(rename = "builtin")]
+    Builtin,
+    #[serde(rename = "skill")]
+    Skill,
+    #[serde(rename = "client")]
+    Client,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// Neutral SDK discriminator for the connected remote session kind.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConnectedRemoteSessionMetadataKind {
+    #[serde(rename = "remote-session")]
+    RemoteSession,
+    #[serde(rename = "coding-agent")]
+    CodingAgent,
+    /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Configuration source
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DiscoveredMcpServerSource {
     #[serde(rename = "user")]
     User,
@@ -2806,12 +3531,13 @@ pub enum DiscoveredMcpServerSource {
     #[serde(rename = "builtin")]
     Builtin,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Server transport type: stdio, http, sse, or memory (local configs are normalized to stdio)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DiscoveredMcpServerType {
     #[serde(rename = "stdio")]
     Stdio,
@@ -2822,24 +3548,26 @@ pub enum DiscoveredMcpServerType {
     #[serde(rename = "memory")]
     Memory,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Discovery source: project (.github/extensions/) or user (~/.copilot/extensions/)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExtensionSource {
     #[serde(rename = "project")]
     Project,
     #[serde(rename = "user")]
     User,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Current status: running, disabled, failed, or starting
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExtensionStatus {
     #[serde(rename = "running")]
     Running,
@@ -2850,65 +3578,74 @@ pub enum ExtensionStatus {
     #[serde(rename = "starting")]
     Starting,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Content block type discriminator
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExternalToolTextResultForLlmContentAudioType {
     #[serde(rename = "audio")]
+    #[default]
     Audio,
 }
 
 /// Content block type discriminator
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExternalToolTextResultForLlmContentImageType {
     #[serde(rename = "image")]
+    #[default]
     Image,
 }
 
 /// Content block type discriminator
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExternalToolTextResultForLlmContentResourceType {
     #[serde(rename = "resource")]
+    #[default]
     Resource,
 }
 
 /// Theme variant this icon is intended for
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExternalToolTextResultForLlmContentResourceLinkIconTheme {
     #[serde(rename = "light")]
     Light,
     #[serde(rename = "dark")]
     Dark,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Content block type discriminator
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExternalToolTextResultForLlmContentResourceLinkType {
     #[serde(rename = "resource_link")]
+    #[default]
     ResourceLink,
 }
 
 /// Content block type discriminator
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExternalToolTextResultForLlmContentTerminalType {
     #[serde(rename = "terminal")]
+    #[default]
     Terminal,
 }
 
 /// Content block type discriminator
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExternalToolTextResultForLlmContentTextType {
     #[serde(rename = "text")]
+    #[default]
     Text,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Allowed values for the `FilterMappingString` enumeration.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FilterMappingString {
     #[serde(rename = "none")]
     None,
@@ -2917,11 +3654,13 @@ pub enum FilterMappingString {
     #[serde(rename = "hidden_characters")]
     HiddenCharacters,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Allowed values for the `FilterMappingValue` enumeration.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FilterMappingValue {
     #[serde(rename = "none")]
     None,
@@ -2930,12 +3669,13 @@ pub enum FilterMappingValue {
     #[serde(rename = "hidden_characters")]
     HiddenCharacters,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Where this source lives — used for UI grouping
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InstructionsSourcesLocation {
     #[serde(rename = "user")]
     User,
@@ -2944,12 +3684,13 @@ pub enum InstructionsSourcesLocation {
     #[serde(rename = "working-directory")]
     WorkingDirectory,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Category of instruction source — used for merge logic
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InstructionsSourcesType {
     #[serde(rename = "home")]
     Home,
@@ -2964,12 +3705,13 @@ pub enum InstructionsSourcesType {
     #[serde(rename = "child-instructions")]
     ChildInstructions,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Log severity level. Determines how the message is displayed in the timeline. Defaults to "info".
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionLogLevel {
     #[serde(rename = "info")]
     Info,
@@ -2978,12 +3720,13 @@ pub enum SessionLogLevel {
     #[serde(rename = "error")]
     Error,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Configuration source: user, workspace, plugin, or builtin
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum McpServerSource {
     #[serde(rename = "user")]
     User,
@@ -2994,12 +3737,13 @@ pub enum McpServerSource {
     #[serde(rename = "builtin")]
     Builtin,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Connection status: connected, failed, needs-auth, pending, disabled, or not_configured
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum McpServerStatus {
     #[serde(rename = "connected")]
     Connected,
@@ -3014,46 +3758,84 @@ pub enum McpServerStatus {
     #[serde(rename = "not_configured")]
     NotConfigured,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// OAuth grant type to use when authenticating to the remote MCP server.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum McpServerConfigHttpOauthGrantType {
     #[serde(rename = "authorization_code")]
     AuthorizationCode,
     #[serde(rename = "client_credentials")]
     ClientCredentials,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Remote transport type. Defaults to "http" when omitted.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum McpServerConfigHttpType {
     #[serde(rename = "http")]
     Http,
     #[serde(rename = "sse")]
     Sse,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Local transport type. Defaults to "local".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum McpServerConfigLocalType {
     #[serde(rename = "local")]
     Local,
     #[serde(rename = "stdio")]
     Stdio,
     /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// Model capability category for grouping in the model picker
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ModelPickerCategory {
+    #[serde(rename = "lightweight")]
+    Lightweight,
+    #[serde(rename = "versatile")]
+    Versatile,
+    #[serde(rename = "powerful")]
+    Powerful,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// Relative cost tier for token-based billing users
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ModelPickerPriceCategory {
+    #[serde(rename = "low")]
+    Low,
+    #[serde(rename = "medium")]
+    Medium,
+    #[serde(rename = "high")]
+    High,
+    #[serde(rename = "very_high")]
+    VeryHigh,
+    /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// The agent mode. Valid values: "interactive", "plan", "autopilot".
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionMode {
     #[serde(rename = "interactive")]
     Interactive,
@@ -3062,112 +3844,89 @@ pub enum SessionMode {
     #[serde(rename = "autopilot")]
     Autopilot,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PermissionDecisionApproveForLocationApprovalCommandsKind {
-    #[serde(rename = "commands")]
-    Commands,
+/// The permission request was approved for this one instance
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PermissionDecisionApproveOnceKind {
+    #[serde(rename = "approve-once")]
+    #[default]
+    ApproveOnce,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PermissionDecisionApproveForLocationApprovalReadKind {
-    #[serde(rename = "read")]
-    Read,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PermissionDecisionApproveForLocationApprovalWriteKind {
-    #[serde(rename = "write")]
-    Write,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PermissionDecisionApproveForLocationApprovalMcpKind {
-    #[serde(rename = "mcp")]
-    Mcp,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PermissionDecisionApproveForLocationApprovalMcpSamplingKind {
-    #[serde(rename = "mcp-sampling")]
-    McpSampling,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PermissionDecisionApproveForLocationApprovalMemoryKind {
-    #[serde(rename = "memory")]
-    Memory,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PermissionDecisionApproveForLocationApprovalCustomToolKind {
-    #[serde(rename = "custom-tool")]
-    CustomTool,
-}
-
-/// The approval to persist for this location
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum PermissionDecisionApproveForLocationApproval {
-    Commands(PermissionDecisionApproveForLocationApprovalCommands),
-    Read(PermissionDecisionApproveForLocationApprovalRead),
-    Write(PermissionDecisionApproveForLocationApprovalWrite),
-    Mcp(PermissionDecisionApproveForLocationApprovalMcp),
-    McpSampling(PermissionDecisionApproveForLocationApprovalMcpSampling),
-    Memory(PermissionDecisionApproveForLocationApprovalMemory),
-    CustomTool(PermissionDecisionApproveForLocationApprovalCustomTool),
-}
-
-/// Approved and persisted for this project location
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PermissionDecisionApproveForLocationKind {
-    #[serde(rename = "approve-for-location")]
-    ApproveForLocation,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Approval scoped to specific command identifiers.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionDecisionApproveForSessionApprovalCommandsKind {
     #[serde(rename = "commands")]
+    #[default]
     Commands,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Approval covering read-only filesystem operations.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionDecisionApproveForSessionApprovalReadKind {
     #[serde(rename = "read")]
+    #[default]
     Read,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Approval covering filesystem write operations.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionDecisionApproveForSessionApprovalWriteKind {
     #[serde(rename = "write")]
+    #[default]
     Write,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Approval covering an MCP tool.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionDecisionApproveForSessionApprovalMcpKind {
     #[serde(rename = "mcp")]
+    #[default]
     Mcp,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Approval covering MCP sampling requests for a server.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionDecisionApproveForSessionApprovalMcpSamplingKind {
     #[serde(rename = "mcp-sampling")]
+    #[default]
     McpSampling,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Approval covering writes to long-term memory.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionDecisionApproveForSessionApprovalMemoryKind {
     #[serde(rename = "memory")]
+    #[default]
     Memory,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Approval covering a custom tool.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionDecisionApproveForSessionApprovalCustomToolKind {
     #[serde(rename = "custom-tool")]
+    #[default]
     CustomTool,
+}
+
+/// Approval covering extension lifecycle operations such as enable, disable, or reload.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PermissionDecisionApproveForSessionApprovalExtensionManagementKind {
+    #[serde(rename = "extension-management")]
+    #[default]
+    ExtensionManagement,
+}
+
+/// Approval covering an extension's request to access a permission-gated capability.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PermissionDecisionApproveForSessionApprovalExtensionPermissionAccessKind {
+    #[serde(rename = "extension-permission-access")]
+    #[default]
+    ExtensionPermissionAccess,
 }
 
 /// The approval to add as a session-scoped rule
@@ -3181,43 +3940,140 @@ pub enum PermissionDecisionApproveForSessionApproval {
     McpSampling(PermissionDecisionApproveForSessionApprovalMcpSampling),
     Memory(PermissionDecisionApproveForSessionApprovalMemory),
     CustomTool(PermissionDecisionApproveForSessionApprovalCustomTool),
+    ExtensionManagement(PermissionDecisionApproveForSessionApprovalExtensionManagement),
+    ExtensionPermissionAccess(PermissionDecisionApproveForSessionApprovalExtensionPermissionAccess),
 }
 
 /// Approved and remembered for the rest of the session
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionDecisionApproveForSessionKind {
     #[serde(rename = "approve-for-session")]
+    #[default]
     ApproveForSession,
 }
 
-/// The permission request was approved for this one instance
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum PermissionDecisionApproveOnceKind {
-    #[serde(rename = "approve-once")]
-    ApproveOnce,
+/// Approval scoped to specific command identifiers.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PermissionDecisionApproveForLocationApprovalCommandsKind {
+    #[serde(rename = "commands")]
+    #[default]
+    Commands,
+}
+
+/// Approval covering read-only filesystem operations.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PermissionDecisionApproveForLocationApprovalReadKind {
+    #[serde(rename = "read")]
+    #[default]
+    Read,
+}
+
+/// Approval covering filesystem write operations.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PermissionDecisionApproveForLocationApprovalWriteKind {
+    #[serde(rename = "write")]
+    #[default]
+    Write,
+}
+
+/// Approval covering an MCP tool.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PermissionDecisionApproveForLocationApprovalMcpKind {
+    #[serde(rename = "mcp")]
+    #[default]
+    Mcp,
+}
+
+/// Approval covering MCP sampling requests for a server.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PermissionDecisionApproveForLocationApprovalMcpSamplingKind {
+    #[serde(rename = "mcp-sampling")]
+    #[default]
+    McpSampling,
+}
+
+/// Approval covering writes to long-term memory.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PermissionDecisionApproveForLocationApprovalMemoryKind {
+    #[serde(rename = "memory")]
+    #[default]
+    Memory,
+}
+
+/// Approval covering a custom tool.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PermissionDecisionApproveForLocationApprovalCustomToolKind {
+    #[serde(rename = "custom-tool")]
+    #[default]
+    CustomTool,
+}
+
+/// Approval covering extension lifecycle operations such as enable, disable, or reload.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PermissionDecisionApproveForLocationApprovalExtensionManagementKind {
+    #[serde(rename = "extension-management")]
+    #[default]
+    ExtensionManagement,
+}
+
+/// Approval covering an extension's request to access a permission-gated capability.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PermissionDecisionApproveForLocationApprovalExtensionPermissionAccessKind {
+    #[serde(rename = "extension-permission-access")]
+    #[default]
+    ExtensionPermissionAccess,
+}
+
+/// The approval to persist for this location
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PermissionDecisionApproveForLocationApproval {
+    Commands(PermissionDecisionApproveForLocationApprovalCommands),
+    Read(PermissionDecisionApproveForLocationApprovalRead),
+    Write(PermissionDecisionApproveForLocationApprovalWrite),
+    Mcp(PermissionDecisionApproveForLocationApprovalMcp),
+    McpSampling(PermissionDecisionApproveForLocationApprovalMcpSampling),
+    Memory(PermissionDecisionApproveForLocationApprovalMemory),
+    CustomTool(PermissionDecisionApproveForLocationApprovalCustomTool),
+    ExtensionManagement(PermissionDecisionApproveForLocationApprovalExtensionManagement),
+    ExtensionPermissionAccess(
+        PermissionDecisionApproveForLocationApprovalExtensionPermissionAccess,
+    ),
+}
+
+/// Approved and persisted for this project location
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PermissionDecisionApproveForLocationKind {
+    #[serde(rename = "approve-for-location")]
+    #[default]
+    ApproveForLocation,
 }
 
 /// Approved and persisted across sessions
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionDecisionApprovePermanentlyKind {
     #[serde(rename = "approve-permanently")]
+    #[default]
     ApprovePermanently,
 }
 
 /// Denied by the user during an interactive prompt
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionDecisionRejectKind {
     #[serde(rename = "reject")]
+    #[default]
     Reject,
 }
 
 /// Denied because user confirmation was unavailable
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionDecisionUserNotAvailableKind {
     #[serde(rename = "user-not-available")]
+    #[default]
     UserNotAvailable,
 }
 
+/// Decision to apply to a pending permission request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PermissionDecision {
@@ -3229,65 +4085,133 @@ pub enum PermissionDecision {
     UserNotAvailable(PermissionDecisionUserNotAvailable),
 }
 
+/// Per-session remote mode. "off" disables remote, "export" exports session events to GitHub without enabling remote steering, "on" enables both export and remote steering.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RemoteSessionMode {
+    #[serde(rename = "off")]
+    Off,
+    #[serde(rename = "export")]
+    Export,
+    #[serde(rename = "on")]
+    On,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
 /// Error classification
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionFsErrorCode {
     ENOENT,
     UNKNOWN,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Entry type
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionFsReaddirWithTypesEntryType {
     #[serde(rename = "file")]
     File,
     #[serde(rename = "directory")]
     Directory,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Path conventions used by this filesystem
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionFsSetProviderConventions {
     #[serde(rename = "windows")]
     Windows,
     #[serde(rename = "posix")]
     Posix,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Signal to send (default: SIGTERM)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShellKillSignal {
     SIGTERM,
     SIGKILL,
     SIGINT,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
+/// Optional target session mode
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SlashCommandAgentPromptMode {
+    #[serde(rename = "interactive")]
+    Interactive,
+    #[serde(rename = "plan")]
+    Plan,
+    #[serde(rename = "autopilot")]
+    Autopilot,
+    /// Unknown variant for forward compatibility.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// Agent prompt result discriminator
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SlashCommandAgentPromptResultKind {
+    #[serde(rename = "agent-prompt")]
+    #[default]
+    AgentPrompt,
+}
+
+/// Completed result discriminator
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SlashCommandCompletedResultKind {
+    #[serde(rename = "completed")]
+    #[default]
+    Completed,
+}
+
+/// Text result discriminator
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SlashCommandTextResultKind {
+    #[serde(rename = "text")]
+    #[default]
+    Text,
+}
+
+/// Result of invoking the slash command (text output, prompt to send to the agent, or completion).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SlashCommandInvocationResult {
+    Text(SlashCommandTextResult),
+    AgentPrompt(SlashCommandAgentPromptResult),
+    Completed(SlashCommandCompletedResult),
+}
+
 /// How the agent is currently being managed by the runtime
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TaskAgentInfoExecutionMode {
     #[serde(rename = "sync")]
     Sync,
     #[serde(rename = "background")]
     Background,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Current lifecycle status of the task
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TaskAgentInfoStatus {
     #[serde(rename = "running")]
     Running,
@@ -3300,43 +4224,47 @@ pub enum TaskAgentInfoStatus {
     #[serde(rename = "cancelled")]
     Cancelled,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Task kind
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TaskAgentInfoType {
     #[serde(rename = "agent")]
+    #[default]
     Agent,
 }
 
 /// Whether the shell runs inside a managed PTY session or as an independent background process
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TaskShellInfoAttachmentMode {
     #[serde(rename = "attached")]
     Attached,
     #[serde(rename = "detached")]
     Detached,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Whether the shell command is currently sync-waited or background-managed
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TaskShellInfoExecutionMode {
     #[serde(rename = "sync")]
     Sync,
     #[serde(rename = "background")]
     Background,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Current lifecycle status of the task
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TaskShellInfoStatus {
     #[serde(rename = "running")]
     Running,
@@ -3349,44 +4277,53 @@ pub enum TaskShellInfoStatus {
     #[serde(rename = "cancelled")]
     Cancelled,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
 /// Task kind
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TaskShellInfoType {
     #[serde(rename = "shell")]
+    #[default]
     Shell,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Type discriminator. Always "array".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UIElicitationArrayAnyOfFieldType {
     #[serde(rename = "array")]
+    #[default]
     Array,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Type discriminator. Always "string".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UIElicitationArrayEnumFieldItemsType {
     #[serde(rename = "string")]
+    #[default]
     String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Type discriminator. Always "array".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UIElicitationArrayEnumFieldType {
     #[serde(rename = "array")]
+    #[default]
     Array,
 }
 
 /// Schema type indicator (always 'object')
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UIElicitationSchemaType {
     #[serde(rename = "object")]
+    #[default]
     Object,
 }
 
 /// The user's response: accept (submitted), decline (rejected), or cancel (dismissed)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UIElicitationResponseAction {
     #[serde(rename = "accept")]
     Accept,
@@ -3395,28 +4332,34 @@ pub enum UIElicitationResponseAction {
     #[serde(rename = "cancel")]
     Cancel,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Type discriminator. Always "boolean".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UIElicitationSchemaPropertyBooleanType {
     #[serde(rename = "boolean")]
+    #[default]
     Boolean,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Numeric type accepted by the field.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UIElicitationSchemaPropertyNumberType {
     #[serde(rename = "number")]
     Number,
     #[serde(rename = "integer")]
     Integer,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Optional format hint that constrains the accepted input.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UIElicitationSchemaPropertyStringFormat {
     #[serde(rename = "email")]
     Email,
@@ -3427,72 +4370,55 @@ pub enum UIElicitationSchemaPropertyStringFormat {
     #[serde(rename = "date-time")]
     DateTime,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Type discriminator. Always "string".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UIElicitationSchemaPropertyStringType {
     #[serde(rename = "string")]
+    #[default]
     String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Type discriminator. Always "string".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UIElicitationStringEnumFieldType {
     #[serde(rename = "string")]
+    #[default]
     String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Type discriminator. Always "string".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UIElicitationStringOneOfFieldType {
     #[serde(rename = "string")]
+    #[default]
     String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WorkspacesGetWorkspaceResultWorkspaceHostType {
     #[serde(rename = "github")]
     Github,
     #[serde(rename = "ado")]
     Ado,
     /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum WorkspacesGetWorkspaceResultWorkspaceSessionSyncLevel {
-    #[serde(rename = "local")]
-    Local,
-    #[serde(rename = "user")]
-    User,
-    #[serde(rename = "repo_and_user")]
-    RepoAndUser,
-    /// Unknown variant for forward compatibility.
-    #[serde(other)]
-    Unknown,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionWorkspacesGetWorkspaceResultWorkspaceHostType {
     #[serde(rename = "github")]
     Github,
     #[serde(rename = "ado")]
     Ado,
     /// Unknown variant for forward compatibility.
-    #[serde(other)]
-    Unknown,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SessionWorkspacesGetWorkspaceResultWorkspaceSessionSyncLevel {
-    #[serde(rename = "local")]
-    Local,
-    #[serde(rename = "user")]
-    User,
-    #[serde(rename = "repo_and_user")]
-    RepoAndUser,
-    /// Unknown variant for forward compatibility.
+    #[default]
     #[serde(other)]
     Unknown,
 }

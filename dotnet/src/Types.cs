@@ -2,14 +2,14 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------------------------------------------*/
 
+using GitHub.Copilot.SDK.Rpc;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using GitHub.Copilot.SDK.Rpc;
-using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Logging;
 
 namespace GitHub.Copilot.SDK;
 
@@ -28,7 +28,7 @@ internal static class GeneratedStringEnumJson
             throw new JsonException($"Expected a non-empty string token when reading {typeToConvert.Name}.");
         }
 
-        return value;
+        return value!;
     }
 
     internal static void WriteValue(Utf8JsonWriter writer, string value, Type typeToConvert)
@@ -40,6 +40,13 @@ internal static class GeneratedStringEnumJson
 
         writer.WriteStringValue(value);
     }
+}
+
+/// <summary>Diagnostic IDs for the Copilot SDK.</summary>
+internal static class Diagnostics
+{
+    /// <summary>Indicates an experimental API that may change or be removed.</summary>
+    internal const string Experimental = "GHCP001";
 }
 
 /// <summary>
@@ -150,6 +157,7 @@ public class CopilotClientOptions
     /// <summary>
     /// Obsolete. This option has no effect.
     /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
     [Obsolete("AutoRestart has no effect and will be removed in a future release.")]
     public bool AutoRestart { get; set; }
     /// <summary>
@@ -530,14 +538,17 @@ public readonly struct PermissionRequestResultKind : IEquatable<PermissionReques
     public static PermissionRequestResultKind NoResult { get; } = new("no-result");
 
     /// <summary>Deprecated. Use <see cref="Rejected"/> instead.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
     [Obsolete("Use Rejected instead.")]
     public static PermissionRequestResultKind DeniedInteractivelyByUser => Rejected;
 
     /// <summary>Deprecated. Use <see cref="UserNotAvailable"/> instead.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
     [Obsolete("Use UserNotAvailable instead.")]
     public static PermissionRequestResultKind DeniedCouldNotRequestFromUser => UserNotAvailable;
 
     /// <summary>Deprecated. Use <see cref="UserNotAvailable"/> instead.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
     [Obsolete("Use UserNotAvailable instead.")]
     public static PermissionRequestResultKind DeniedByRules => UserNotAvailable;
 
@@ -1922,6 +1933,14 @@ public class CustomAgentConfig
     /// </summary>
     [JsonPropertyName("skills")]
     public IList<string>? Skills { get; set; }
+
+    /// <summary>
+    /// Model identifier for this agent (e.g. "claude-haiku-4.5").
+    /// When set, the runtime will attempt to use this model for the agent,
+    /// falling back to the parent session model if unavailable.
+    /// </summary>
+    [JsonPropertyName("model")]
+    public string? Model { get; set; }
 }
 
 /// <summary>
@@ -2017,6 +2036,7 @@ public class SessionConfig
         ReasoningEffort = other.ReasoningEffort;
         CreateSessionFsHandler = other.CreateSessionFsHandler;
         GitHubToken = other.GitHubToken;
+        RemoteSession = other.RemoteSession;
         SessionId = other.SessionId;
         SkillDirectories = other.SkillDirectories is not null ? [.. other.SkillDirectories] : null;
         InstructionDirectories = other.InstructionDirectories is not null ? [.. other.InstructionDirectories] : null;
@@ -2243,6 +2263,16 @@ public class SessionConfig
     public string? GitHubToken { get; set; }
 
     /// <summary>
+    /// Per-session remote behavior control:
+    /// <list type="bullet">
+    /// <item><description><c>"off"</c> — local only, no remote export (default)</description></item>
+    /// <item><description><c>"export"</c> — export session events to GitHub without enabling remote steering</description></item>
+    /// <item><description><c>"on"</c> — export to GitHub AND enable remote steering</description></item>
+    /// </list>
+    /// </summary>
+    public RemoteSessionMode? RemoteSession { get; set; }
+
+    /// <summary>
     /// Creates a shallow clone of this <see cref="SessionConfig"/> instance.
     /// </summary>
     /// <remarks>
@@ -2308,6 +2338,7 @@ public class ResumeSessionConfig
         ReasoningEffort = other.ReasoningEffort;
         CreateSessionFsHandler = other.CreateSessionFsHandler;
         GitHubToken = other.GitHubToken;
+        RemoteSession = other.RemoteSession;
         SkillDirectories = other.SkillDirectories is not null ? [.. other.SkillDirectories] : null;
         InstructionDirectories = other.InstructionDirectories is not null ? [.. other.InstructionDirectories] : null;
         Streaming = other.Streaming;
@@ -2543,6 +2574,12 @@ public class ResumeSessionConfig
     /// and stores it on the session for content exclusion, model routing, and quota checks.
     /// </summary>
     public string? GitHubToken { get; set; }
+
+    /// <summary>
+    /// Per-session remote behavior control.
+    /// See <see cref="SessionConfig.RemoteSession"/> for details.
+    /// </summary>
+    public RemoteSessionMode? RemoteSession { get; set; }
 
     /// <summary>
     /// Creates a shallow clone of this <see cref="ResumeSessionConfig"/> instance.
@@ -2867,7 +2904,7 @@ public class ModelBilling
     /// Billing cost multiplier relative to the base model rate.
     /// </summary>
     [JsonPropertyName("multiplier")]
-    public double Multiplier { get; set; }
+    public double? Multiplier { get; set; }
 }
 
 /// <summary>

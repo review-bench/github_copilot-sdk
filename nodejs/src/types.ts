@@ -10,6 +10,8 @@
 import type { SessionFsProvider } from "./sessionFsProvider.js";
 import type { SessionEvent as GeneratedSessionEvent } from "./generated/session-events.js";
 import type { CopilotSession } from "./session.js";
+import type { RemoteSessionMode } from "./generated/rpc.js";
+export type { RemoteSessionMode } from "./generated/rpc.js";
 export type SessionEvent = GeneratedSessionEvent;
 export type { SessionFsProvider } from "./sessionFsProvider.js";
 export { createSessionFsAdapter } from "./sessionFsProvider.js";
@@ -322,9 +324,13 @@ export function convertMcpCallToolResult(callResult: McpCallToolResult): ToolRes
                     textParts.push(block.resource.text);
                 }
                 if (block.resource?.blob) {
+                    const mimeType = block.resource.mimeType;
                     binaryResults.push({
                         data: block.resource.blob,
-                        mimeType: block.resource.mimeType ?? "application/octet-stream",
+                        mimeType:
+                            typeof mimeType === "string" && mimeType
+                                ? mimeType
+                                : "application/octet-stream",
                         type: "resource",
                         description: block.resource.uri,
                     });
@@ -1207,6 +1213,12 @@ export interface CustomAgentConfig {
      * When omitted, no skills are injected (opt-in model).
      */
     skills?: string[];
+    /**
+     * Model identifier for this agent (e.g. "claude-haiku-4.5").
+     * When set, the runtime will attempt to use this model for the agent,
+     * falling back to the parent session model if unavailable.
+     */
+    model?: string;
 }
 
 /**
@@ -1474,6 +1486,14 @@ export interface SessionConfig {
     gitHubToken?: string;
 
     /**
+     * Per-session remote behavior control:
+     * - `"off"` — local only, no remote export (default)
+     * - `"export"` — export session events to GitHub without enabling remote steering
+     * - `"on"` — export to GitHub AND enable remote steering
+     */
+    remoteSession?: RemoteSessionMode;
+
+    /**
      * Optional event handler that is registered on the session before the
      * session.create RPC is issued. This guarantees that early events emitted
      * by the CLI during session creation (e.g. session.start) are delivered to
@@ -1527,6 +1547,7 @@ export type ResumeSessionConfig = Pick<
     | "disabledSkills"
     | "infiniteSessions"
     | "gitHubToken"
+    | "remoteSession"
     | "onEvent"
     | "createSessionFsHandler"
 > & {
@@ -1838,7 +1859,7 @@ export interface ModelPolicy {
  * Model billing information
  */
 export interface ModelBilling {
-    multiplier: number;
+    multiplier?: number;
 }
 
 /**

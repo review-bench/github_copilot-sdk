@@ -30,6 +30,7 @@ permissions:
 jobs:
   test:
     name: "Rust SDK Tests"
+    if: github.event.repository.fork == false
     env:
       POWERSHELL_UPDATECHECK: Off
       CARGO_TERM_COLOR: always
@@ -69,6 +70,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: "rust"
+          prefix-key: v1-rust-no-bin
+          cache-bin: false
 
       - name: cargo fmt --check (nightly)
         if: runner.os == 'Linux'
@@ -93,22 +96,12 @@ jobs:
         run: pwsh.exe -Command "Write-Host 'PowerShell ready'"
 
       - name: cargo test
+        timeout-minutes: 90
         env:
+          RUST_E2E_CONCURRENCY: 4
           COPILOT_HMAC_KEY: ${{ secrets.COPILOT_DEVELOPER_CLI_INTEGRATION_HMAC_KEY }}
           COPILOT_CLI_PATH: ${{ steps.setup-copilot.outputs.cli-path }}
-        run: cargo test --features test-support
-
-      # Detects accidental public-API breakage against the crate's last
-      # published version on crates.io. Non-blocking until the crate has
-      # a first published release — once a 0.1.0 ships, flip
-      # `continue-on-error` to `false` to enforce SemVer.
-      - name: cargo semver-checks
-        if: runner.os == 'Linux'
-        continue-on-error: true
-        uses: obi1kenobi/cargo-semver-checks-action@v2
-        with:
-          package: github-copilot-sdk
-          manifest-path: rust/Cargo.toml
+        run: cargo test --features test-support -- --test-threads=4 --nocapture
 
   # Validates the `embedded-cli` build path on all three supported
   # platforms. This is the only place `build.rs` actually runs (the
@@ -119,6 +112,7 @@ jobs:
   # bundled-CLI release pipeline) hit them downstream.
   bundle:
     name: "Rust SDK Bundled CLI Build"
+    if: github.event.repository.fork == false
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
@@ -143,6 +137,8 @@ jobs:
         with:
           workspaces: "rust"
           key: bundled-cli
+          prefix-key: v1-rust-no-bin
+          cache-bin: false
 
       - name: Read pinned @github/copilot CLI version
         id: cli-version

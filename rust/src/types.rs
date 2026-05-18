@@ -206,7 +206,7 @@ impl PartialEq<SessionId> for &SessionId {
 /// A newtype wrapper around `String` that provides type safety — prevents
 /// accidentally passing a session ID or workspace ID where a request ID
 /// is expected. Derefs to `str` for zero-friction borrowing.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct RequestId(String);
 
@@ -526,6 +526,12 @@ pub struct CustomAgentConfig {
     /// Skill names to preload into this agent's context at startup.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skills: Option<Vec<String>>,
+    /// Model identifier for this agent (e.g. `"claude-haiku-4.5"`).
+    ///
+    /// When set, the runtime will attempt to use this model for the agent,
+    /// falling back to the parent session model if unavailable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 impl CustomAgentConfig {
@@ -585,6 +591,12 @@ impl CustomAgentConfig {
         S: Into<String>,
     {
         self.skills = Some(skills.into_iter().map(Into::into).collect());
+        self
+    }
+
+    /// Set the model identifier for this agent.
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
         self
     }
 }
@@ -1081,6 +1093,13 @@ pub struct SessionConfig {
     /// quota checks for *this session*.
     #[serde(rename = "gitHubToken", skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,
+    /// Per-session remote behavior control:
+    /// - `Off` — local only, no remote export (default)
+    /// - `Export` — export session events to GitHub without
+    ///   enabling remote steering
+    /// - `On` — export to GitHub AND enable remote steering
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_session: Option<crate::generated::api_types::RemoteSessionMode>,
     /// Forward sub-agent streaming events to this connection. When false,
     /// only non-streaming sub-agent events and `subagent.*` lifecycle events
     /// are delivered. Defaults to true on the CLI.
@@ -1152,6 +1171,7 @@ impl std::fmt::Debug for SessionConfig {
                 "github_token",
                 &self.github_token.as_ref().map(|_| "<redacted>"),
             )
+            .field("remote_session", &self.remote_session)
             .field(
                 "include_sub_agent_streaming_events",
                 &self.include_sub_agent_streaming_events,
@@ -1211,6 +1231,7 @@ impl Default for SessionConfig {
             config_dir: None,
             working_directory: None,
             github_token: None,
+            remote_session: None,
             include_sub_agent_streaming_events: None,
             commands: None,
             session_fs_provider: None,
@@ -1528,6 +1549,15 @@ impl SessionConfig {
         self.include_sub_agent_streaming_events = Some(include);
         self
     }
+
+    /// Set per-session remote behavior.
+    pub fn with_remote_session(
+        mut self,
+        mode: crate::generated::api_types::RemoteSessionMode,
+    ) -> Self {
+        self.remote_session = Some(mode);
+        self
+    }
 }
 
 /// Configuration for resuming an existing session via the `session.resume` RPC.
@@ -1544,6 +1574,9 @@ pub struct ResumeSessionConfig {
     /// Application name sent as User-Agent context.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_name: Option<String>,
+    /// Desired reasoning effort to apply after resuming the session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
     /// Enable streaming token deltas.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub streaming: Option<bool>,
@@ -1636,6 +1669,10 @@ pub struct ResumeSessionConfig {
     /// [`SessionConfig::github_token`].
     #[serde(rename = "gitHubToken", skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,
+    /// Per-session remote behavior control on resume. See
+    /// [`SessionConfig::remote_session`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_session: Option<crate::generated::api_types::RemoteSessionMode>,
     /// Forward sub-agent streaming events to this connection on resume.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_sub_agent_streaming_events: Option<bool>,
@@ -1679,6 +1716,7 @@ impl std::fmt::Debug for ResumeSessionConfig {
         f.debug_struct("ResumeSessionConfig")
             .field("session_id", &self.session_id)
             .field("client_name", &self.client_name)
+            .field("reasoning_effort", &self.reasoning_effort)
             .field("streaming", &self.streaming)
             .field("system_message", &self.system_message)
             .field("tools", &self.tools)
@@ -1708,6 +1746,7 @@ impl std::fmt::Debug for ResumeSessionConfig {
                 "github_token",
                 &self.github_token.as_ref().map(|_| "<redacted>"),
             )
+            .field("remote_session", &self.remote_session)
             .field(
                 "include_sub_agent_streaming_events",
                 &self.include_sub_agent_streaming_events,
@@ -1738,6 +1777,7 @@ impl ResumeSessionConfig {
         Self {
             session_id,
             client_name: None,
+            reasoning_effort: None,
             streaming: None,
             system_message: None,
             tools: None,
@@ -1765,6 +1805,7 @@ impl ResumeSessionConfig {
             config_dir: None,
             working_directory: None,
             github_token: None,
+            remote_session: None,
             include_sub_agent_streaming_events: None,
             commands: None,
             session_fs_provider: None,
@@ -1851,6 +1892,12 @@ impl ResumeSessionConfig {
     /// Set the application name sent as `User-Agent` context.
     pub fn with_client_name(mut self, name: impl Into<String>) -> Self {
         self.client_name = Some(name.into());
+        self
+    }
+
+    /// Set the reasoning effort to apply on resume.
+    pub fn with_reasoning_effort(mut self, effort: impl Into<String>) -> Self {
+        self.reasoning_effort = Some(effort.into());
         self
     }
 
@@ -2040,6 +2087,15 @@ impl ResumeSessionConfig {
     /// Forward sub-agent streaming events to this connection on resume.
     pub fn with_include_sub_agent_streaming_events(mut self, include: bool) -> Self {
         self.include_sub_agent_streaming_events = Some(include);
+        self
+    }
+
+    /// Set per-session remote behavior on resume.
+    pub fn with_remote_session(
+        mut self,
+        mode: crate::generated::api_types::RemoteSessionMode,
+    ) -> Self {
+        self.remote_session = Some(mode);
         self
     }
 
@@ -3125,7 +3181,8 @@ mod tests {
         Attachment, AttachmentLineRange, AttachmentSelectionPosition, AttachmentSelectionRange,
         ConnectionState, CustomAgentConfig, DeliveryMode, GitHubReferenceType,
         InfiniteSessionConfig, ProviderConfig, ResumeSessionConfig, SessionConfig, SessionEvent,
-        SessionId, SystemMessageConfig, Tool, ensure_attachment_display_names,
+        SessionId, SystemMessageConfig, Tool, ToolBinaryResult, ToolResult, ToolResultExpanded,
+        ToolResultResponse, ensure_attachment_display_names,
     };
     use crate::generated::session_events::TypedSessionEvent;
 
@@ -3152,9 +3209,92 @@ mod tests {
     }
 
     #[test]
+    fn custom_agent_config_builder_with_model() {
+        let agent = CustomAgentConfig::new("my-agent", "You are helpful.")
+            .with_model("claude-haiku-4.5")
+            .with_display_name("My Agent");
+        assert_eq!(agent.name, "my-agent");
+        assert_eq!(agent.model.as_deref(), Some("claude-haiku-4.5"));
+        assert_eq!(agent.display_name.as_deref(), Some("My Agent"));
+    }
+
+    #[test]
+    fn custom_agent_config_serializes_model() {
+        let agent = CustomAgentConfig::new("model-agent", "prompt").with_model("claude-haiku-4.5");
+        let wire = serde_json::to_value(&agent).unwrap();
+        assert_eq!(wire["model"], "claude-haiku-4.5");
+        assert_eq!(wire["name"], "model-agent");
+    }
+
+    #[test]
+    fn custom_agent_config_omits_model_when_none() {
+        let agent = CustomAgentConfig::new("no-model-agent", "prompt");
+        let wire = serde_json::to_value(&agent).unwrap();
+        assert!(wire.get("model").is_none());
+    }
+
+    #[test]
     fn tool_with_parameters_handles_non_object_value() {
         let tool = Tool::new("noop").with_parameters(json!(null));
         assert!(tool.parameters.is_empty());
+    }
+
+    #[test]
+    fn tool_result_expanded_serializes_binary_results_for_llm() {
+        let response = ToolResultResponse {
+            result: ToolResult::Expanded(ToolResultExpanded {
+                text_result_for_llm: "rendered chart".to_string(),
+                result_type: "success".to_string(),
+                binary_results_for_llm: Some(vec![ToolBinaryResult {
+                    data: "aW1n".to_string(),
+                    mime_type: "image/png".to_string(),
+                    r#type: "image".to_string(),
+                    description: Some("chart preview".to_string()),
+                }]),
+                session_log: None,
+                error: None,
+                tool_telemetry: None,
+            }),
+        };
+
+        let wire = serde_json::to_value(&response).unwrap();
+
+        assert_eq!(
+            wire,
+            json!({
+                "result": {
+                    "textResultForLlm": "rendered chart",
+                    "resultType": "success",
+                    "binaryResultsForLlm": [
+                        {
+                            "data": "aW1n",
+                            "mimeType": "image/png",
+                            "type": "image",
+                            "description": "chart preview"
+                        }
+                    ]
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn tool_result_expanded_omits_binary_results_for_llm_when_none() {
+        let response = ToolResultResponse {
+            result: ToolResult::Expanded(ToolResultExpanded {
+                text_result_for_llm: "ok".to_string(),
+                result_type: "success".to_string(),
+                binary_results_for_llm: None,
+                session_log: None,
+                error: None,
+                tool_telemetry: None,
+            }),
+        };
+
+        let wire = serde_json::to_value(&response).unwrap();
+
+        assert_eq!(wire["result"]["textResultForLlm"], "ok");
+        assert!(wire["result"].get("binaryResultsForLlm").is_none());
     }
 
     #[test]
