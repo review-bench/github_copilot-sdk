@@ -156,9 +156,9 @@ macro_rules! define_subscription {
             /// Returns:
             ///
             /// - `Ok(event)` for the next delivered event.
-            /// - `Err(`[`RecvErrorKind::Lagged`]`)` if the subscriber fell behind;
+            /// - `Err(`[`RecvError`]`)` with [`RecvError::kind()`] [`RecvErrorKind::Lagged`] if the subscriber fell behind;
             ///   call `recv` again to continue from the next live event.
-            /// - `Err(`[`RecvErrorKind::Closed`]`)` once the producer is gone.
+            /// - `Err(`[`RecvError`]`)` with [`RecvError::kind()`] [`RecvErrorKind::Closed`] once the producer is gone.
             ///
             /// # Cancel safety
             ///

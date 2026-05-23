@@ -1,9 +1,12 @@
 //! Crate errors.
 
-use std::{
-    backtrace::{Backtrace, BacktraceStatus}, borrow::{Borrow, Cow}, fmt, time::Duration
-};
 use crate::types::SessionId;
+use std::{
+    backtrace::{Backtrace, BacktraceStatus},
+    borrow::{Borrow, Cow},
+    fmt,
+    time::Duration,
+};
 
 /// Crate-specific [`Result`](std::result::Result).
 pub type Result<T> = std::result::Result<T, Error>;
@@ -168,7 +171,10 @@ impl fmt::Display for SessionErrorKind {
             SessionErrorKind::InvalidSessionFsConfig => {
                 write!(f, "invalid SessionFsConfig")
             }
-            SessionErrorKind::SessionIdMismatch { requested, returned } => write!(
+            SessionErrorKind::SessionIdMismatch {
+                requested,
+                returned,
+            } => write!(
                 f,
                 "CLI returned session ID {returned} after SDK registered {requested}"
             ),
@@ -214,7 +220,10 @@ impl fmt::Display for ErrorKind {
             ErrorKind::Session(k) => write!(f, "{k}"),
             ErrorKind::Io => write!(f, "I/O error"),
             ErrorKind::Json => write!(f, "JSON error"),
-            ErrorKind::BinaryNotFound { name, hint: Some(h) } => {
+            ErrorKind::BinaryNotFound {
+                name,
+                hint: Some(h),
+            } => {
                 write!(f, "binary not found: {name} ({h})")
             }
             ErrorKind::BinaryNotFound { name, hint: None } => {
@@ -299,12 +308,15 @@ impl Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let &ErrorKind::Rpc { code } = self.kind() {
-            write!(f, "{}: ", ErrorKind::Rpc { code })?;
-        }
         match &self.repr {
             Repr::Simple(kind) => write!(f, "{kind}"),
+            Repr::SimpleMessage(kind, message) if matches!(kind, ErrorKind::Rpc { code: _ }) => {
+                write!(f, "{kind}: {message}")
+            }
             Repr::SimpleMessage(_, message) => write!(f, "{message}"),
+            Repr::Custom(Custom { kind, error }) if matches!(kind, ErrorKind::Rpc { code: _ }) => {
+                write!(f, "{kind}: {error}")
+            }
             Repr::Custom(Custom { error, .. }) => write!(f, "{error}"),
         }
     }
