@@ -12,14 +12,14 @@
 //! If you've opted out of bundling (via `default-features = false`) and
 //! neither `CliProgram::Path` nor `COPILOT_CLI_PATH` is set,
 //! [`Client::start`](crate::Client::start) returns
-//! [`Error::BinaryNotFound`](crate::Error::BinaryNotFound).
+//! an [`ErrorKind::BinaryNotFound`](crate::ErrorKind::BinaryNotFound) error.
 
 use std::env;
 use std::path::{Path, PathBuf};
 
 use tracing::warn;
 
-use crate::Error;
+use crate::{Error, ErrorKind};
 
 /// Resolve the CLI binary, optionally overriding the directory the bundled
 /// CLI is extracted to. Called by `Client::start` to thread
@@ -47,11 +47,14 @@ pub(crate) fn copilot_binary_with_extract_dir(
         return Ok(path);
     }
 
-    Err(Error::BinaryNotFound {
-        name: "copilot",
-        hint: "the Copilot CLI is not bundled in this build of github-copilot-sdk and \
-               COPILOT_CLI_PATH is not set. Either keep the default `bundled-cli` cargo \
-               feature enabled, set COPILOT_CLI_PATH, or supply an explicit path via \
-               `CliProgram::Path(...)` on `ClientOptions::program`.",
-    })
+    Err(ErrorKind::BinaryNotFound {
+        name: "copilot".into(),
+        hint: Some(
+            "the Copilot CLI is not bundled in this build of github-copilot-sdk and \
+             COPILOT_CLI_PATH is not set. Either keep the default `bundled-cli` cargo \
+             feature enabled, set COPILOT_CLI_PATH, or supply an explicit path via \
+             `CliProgram::Path(...)` on `ClientOptions::program`."
+                .into(),
+        ),
+    }.into())
 }

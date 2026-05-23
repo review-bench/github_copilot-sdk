@@ -29,6 +29,7 @@
   - **.NET testing note:** Never add `InternalsVisibleTo` to any project file when writing tests. Tests must only access public APIs.
   - Java: `cd java && mvn clean verify` (full build + tests), `mvn spotless:apply` (format code before commit)
   - **Java testing note:** Always use `mvn verify` without `-q` and without piping through `grep`. Never add `InternalsVisibleTo` equivalent — tests must only access public APIs.
+- Use configured LSPs for supported operations like finding references instead of pattern matching, renaming symbols, etc.
 
 ## Testing & E2E tips ⚙️
 
