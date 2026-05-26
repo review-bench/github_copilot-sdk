@@ -637,6 +637,18 @@ export type OptionsUpdateEnvValueMode =
   /** Resolve MCP server environment values from host-side references. */
   | "indirect";
 /**
+ * Controls how availableTools (allowlist) and excludedTools (denylist) combine when both are set.
+ *
+ * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
+ * via the `definition` "OptionsUpdateToolFilterPrecedence".
+ */
+/** @experimental */
+export type OptionsUpdateToolFilterPrecedence =
+  /** If availableTools is set, it is the only constraint that applies (excludedTools is ignored). Preserves CLI / pre-existing client behavior. Default. */
+  | "available"
+  /** A tool is enabled iff it matches the allowlist (or the allowlist is unset) AND it does not match the denylist. Makes 'all except X' expressible by combining the two lists. */
+  | "excluded";
+/**
  * The client's response to the pending permission prompt
  *
  * This interface was referenced by `_RpcSchemaRoot`'s JSON-Schema
@@ -7569,6 +7581,7 @@ export interface SessionUpdateOptionsParams {
    */
   logInteractiveShells?: boolean;
   envValueMode?: OptionsUpdateEnvValueMode;
+  toolFilterPrecedence?: OptionsUpdateToolFilterPrecedence;
   /**
    * Additional directories to search for skills.
    */
